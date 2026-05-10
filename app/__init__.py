@@ -1,0 +1,1 @@
+﻿"""ShinobuChat backend package."""
