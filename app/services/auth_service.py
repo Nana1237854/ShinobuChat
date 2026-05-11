@@ -1,13 +1,17 @@
 ﻿from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
+from jose import jwt
+from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
-from app.core.security import get_password_hash, verify_password
+from app.core.config import settings
 from app.models.device import Device
 from app.models.user import User
 from app.schemas.user import UserCreate
+
+pwd_context = CryptContext(schemes=["pbkdf2_sha256", "bcrypt"], deprecated="auto")
 
 
 class AuthService:
@@ -21,7 +25,7 @@ class AuthService:
 
         user = User(
             email=payload.email,
-            hashed_password=get_password_hash(payload.password),
+            hashed_password=self._hash_password(payload.password),
             display_name=payload.display_name,
         )
         self.db.add(user)
@@ -31,7 +35,7 @@ class AuthService:
 
     def authenticate_user(self, email: str, password: str) -> User:
         user = self.db.query(User).filter(User.email == email).first()
-        if not user or not verify_password(password, user.hashed_password):
+        if not user or not self._verify_password(password, user.hashed_password):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
         return user
 
@@ -60,3 +64,15 @@ class AuthService:
             device.last_seen_at = datetime.utcnow()
             self.db.add(device)
             self.db.commit()
+
+    def _verify_password(self, plain_password: str, hashed_password: str) -> bool:
+        return pwd_context.verify(plain_password, hashed_password)
+
+    def _hash_password(self, password: str) -> str:
+        return pwd_context.hash(password)
+
+    def create_access_token(self, subject: str, expires_minutes: int | None = None) -> str:
+        minutes = expires_minutes or settings.jwt_access_token_expire_minutes
+        expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+        payload = {"sub": subject, "exp": expire}
+        return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)

@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import get_auth_service
 from app.core.config import settings
-from app.core.security import create_access_token
 from app.schemas.auth import (
     DeviceAuthorizeRequest,
     DeviceAuthorizeResponse,
@@ -72,7 +71,7 @@ def device_token(
         device_type=auth_record["device_type"],
     )
 
-    access_token = create_access_token(subject=auth_record["user_id"])
+    access_token = auth_service.create_access_token(subject=auth_record["user_id"])
     PENDING_DEVICE_AUTH.pop(payload.device_code, None)
 
     return DeviceTokenResponse(
