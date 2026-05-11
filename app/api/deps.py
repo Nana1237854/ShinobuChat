@@ -5,6 +5,7 @@ from app.db.session import get_db
 from app.services.auth_service import AuthService
 from app.services.conversation_service import ConversationService
 from app.services.device_registry_service import DeviceRegistryService
+from app.services.memory_service import MemoryService
 from app.services.message_service import MessageService
 
 
@@ -22,3 +23,7 @@ def get_conversation_service(db: Session = Depends(get_db)) -> ConversationServi
 
 def get_message_service(db: Session = Depends(get_db)) -> MessageService:
     return MessageService(db)
+
+
+def get_memory_service(db: Session = Depends(get_db)) -> MemoryService:
+    return MemoryService(db)

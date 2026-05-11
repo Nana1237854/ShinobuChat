@@ -450,6 +450,15 @@
       color: var(--accent-deep);
     }
 
+    .status-orb.synced {
+      color: #276050;
+      background: rgba(220, 239, 230, 0.88);
+    }
+
+    .status-orb.sync-pending {
+      color: var(--muted);
+    }
+
     .live-room.conversation-open .status-orb {
       opacity: 0;
       pointer-events: none;
@@ -920,8 +929,8 @@
 
       <button class="status-orb" type="button" id="statusOrb">
         <strong>今日 4 Todo</strong>
-        <span>Agent 空闲</span>
-        <span>iOS 已同步</span>
+        <span id="agentSyncState">Agent 空闲</span>
+        <span id="iosSyncState">iOS 待同步</span>
       </button>
 
       <form class="input-bar" id="composerForm" aria-label="主发送栏">
@@ -952,7 +961,8 @@
     const storageKeys = {
       demoUser: "shinobu-demo-user",
       conversationId: "shinobu-conversation-id",
-      routeMode: "shinobu-route-mode"
+      routeMode: "shinobu-route-mode",
+      syncDeviceId: "shinobu-sync-device-id"
     };
 
     const routeModeConfig = {
@@ -976,7 +986,9 @@
       routeMode: localStorage.getItem(storageKeys.routeMode) || "auto",
       messages: [],
       isStreaming: false,
-      pendingAssistantId: null
+      pendingAssistantId: null,
+      syncSource: null,
+      syncStatus: null
     };
 
     const liveRoom = document.getElementById("liveRoom");
@@ -1003,6 +1015,59 @@
     const panelSendBtn = document.getElementById("panelSendBtn");
     const newConversationBtn = document.getElementById("newConversationBtn");
     const composerForm = document.getElementById("composerForm");
+    const agentSyncState = document.getElementById("agentSyncState");
+    const iosSyncState = document.getElementById("iosSyncState");
+
+    function getSyncDeviceId() {
+      const existing = localStorage.getItem(storageKeys.syncDeviceId);
+      if (existing) return existing;
+      const nextId = crypto.randomUUID ? crypto.randomUUID() : `web-${Date.now()}`;
+      localStorage.setItem(storageKeys.syncDeviceId, nextId);
+      return nextId;
+    }
+
+    function updateStatusOrb() {
+      const status = state.syncStatus;
+      const iosSynced = Boolean(status && status.ios_synced);
+      statusOrb.classList.toggle("synced", iosSynced);
+      statusOrb.classList.toggle("sync-pending", !iosSynced);
+      agentSyncState.textContent = state.isStreaming ? "Agent 回复中" : "Agent 空闲";
+      iosSyncState.textContent = iosSynced ? "iOS 已同步" : "iOS 待同步";
+      if (status) {
+        statusOrb.title = `在线设备 ${status.online_devices}，iOS 在线 ${status.online_ios_devices}，APNs ${status.ios_push_targets}`;
+      }
+    }
+
+    function connectRealtimeSync() {
+      if (!state.userId || state.syncSource) return;
+      const params = new URLSearchParams({
+        user_id: state.userId,
+        device_id: getSyncDeviceId(),
+        device_type: "web"
+      });
+      const source = new EventSource(`${apiBase}/sync/events?${params}`);
+      state.syncSource = source;
+
+      ["sync.connected", "presence.changed", "sync.heartbeat", "message.synced"].forEach((eventName) => {
+        source.addEventListener(eventName, (event) => {
+          const payload = JSON.parse(event.data);
+          state.syncStatus = payload;
+          updateStatusOrb();
+          if (eventName === "message.synced" && payload.conversation_id === state.conversationId) {
+            const exists = state.messages.some((item) => item.id === payload.message.id);
+            if (!exists) {
+              appendMessage(payload.message);
+            }
+          }
+        });
+      });
+
+      source.onerror = () => {
+        state.syncSource = null;
+        source.close();
+        window.setTimeout(connectRealtimeSync, 1600);
+      };
+    }
 
     function showToast(message) {
       const toast = document.createElement("div");
@@ -1021,6 +1086,7 @@
 
     function syncIdleUiState() {
       liveRoom.classList.toggle("idle-ui", !state.isStreaming);
+      updateStatusOrb();
     }
 
     function applyResponsiveLayout() {
@@ -1252,6 +1318,7 @@
         if (state.conversationId) {
           await loadConversationMessages(state.conversationId);
         }
+        connectRealtimeSync();
         connectionChip.textContent = "已连接原型后端";
       } catch (error) {
         if (retry) {

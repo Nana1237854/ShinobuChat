@@ -18,6 +18,10 @@ class Settings(BaseSettings):
 
     oauth2_device_code_ttl_seconds: int = 900
     oauth2_poll_interval_seconds: int = 5
+    sync_heartbeat_seconds: int = 20
+
+    apns_offline_fallback_enabled: bool = True
+    apns_sandbox: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="SC_")
 
