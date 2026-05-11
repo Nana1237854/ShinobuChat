@@ -1,0 +1,20 @@
+{
+    "Type": "Live2D Expression",
+    "Parameters": [
+        {
+            "Id": "fase79",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "fase78",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "fase75",
+            "Value": 1.0,
+            "Blend": "Add"
+        }
+    ]
+}
