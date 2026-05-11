@@ -24,8 +24,9 @@ class MessageStreamState:
 
 
 class ChatService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, sync: SyncService):
         self.db = db
+        self.sync = sync
 
     def create_conversation(
         self,
@@ -166,7 +167,7 @@ class ChatService:
             conversation.summary = summary
 
     def _record_message_change(self, user_id: UUID, message: Message) -> None:
-        SyncService(self.db).record_server_change(
+        self.sync.record_server_change(
             user_id,
             "messages",
             message.id,

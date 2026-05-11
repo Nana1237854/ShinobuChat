@@ -102,52 +102,39 @@ class SyncService:
             self._publish_sync_change(record, operation, data)
         return record
 
+    def _backfill_entities(
+        self,
+        user_id: UUID,
+        entity_type: str,
+        Schema: type,
+        entities: list,
+        timestamp_attr: str = "updated_at",
+    ) -> None:
+        for entity in entities:
+            if self._record_for(entity_type, entity.id):
+                continue
+            ts = getattr(entity, timestamp_attr, None)
+            self.record_server_change(
+                user_id,
+                entity_type,
+                entity.id,
+                "upsert",
+                Schema.model_validate(entity).model_dump(mode="json"),
+                ts,
+                "server-bootstrap",
+                notify=False,
+            )
+
     def _backfill_existing(self, user_id: UUID) -> None:
         conversation_ids = select(Conversation.id).where(Conversation.user_id == user_id)
         messages = self.db.query(Message).filter(Message.conversation_id.in_(conversation_ids)).all()
-        for message in messages:
-            if self._record_for("messages", message.id):
-                continue
-            self.record_server_change(
-                user_id,
-                "messages",
-                message.id,
-                "upsert",
-                MessageOut.model_validate(message).model_dump(mode="json"),
-                message.created_at,
-                "server-bootstrap",
-                notify=False,
-            )
+        self._backfill_entities(user_id, "messages", MessageOut, messages, "created_at")
 
         todos = self.db.query(Todo).filter(Todo.user_id == user_id).all()
-        for todo in todos:
-            if self._record_for("todos", todo.id):
-                continue
-            self.record_server_change(
-                user_id,
-                "todos",
-                todo.id,
-                "upsert",
-                TodoOut.model_validate(todo).model_dump(mode="json"),
-                todo.updated_at,
-                "server-bootstrap",
-                notify=False,
-            )
+        self._backfill_entities(user_id, "todos", TodoOut, todos)
 
         memories = self.db.query(Memory).filter(Memory.user_id == user_id).all()
-        for memory in memories:
-            if self._record_for("memory", memory.id):
-                continue
-            self.record_server_change(
-                user_id,
-                "memory",
-                memory.id,
-                "upsert",
-                MemoryOut.model_validate(memory).model_dump(mode="json"),
-                memory.updated_at,
-                "server-bootstrap",
-                notify=False,
-            )
+        self._backfill_entities(user_id, "memory", MemoryOut, memories)
 
     def _apply_client_change(self, user_id: UUID, device_id: str, change: SyncChangeIn) -> SyncPushResult:
         record = self._record_for(change.entity_type, change.entity_id)

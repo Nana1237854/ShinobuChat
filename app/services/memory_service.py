@@ -24,9 +24,10 @@ from app.services.sync_service import SyncService
 
 
 class MemoryService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, sync: SyncService):
         self.db = db
         self.embedding = EmbeddingService(db)
+        self.sync = sync
 
     def create(self, payload: MemoryCreate) -> Memory:
         require_user(self.db, payload.user_id)
@@ -50,7 +51,7 @@ class MemoryService:
         self.db.add(memory)
         self.db.commit()
         self.db.refresh(memory)
-        SyncService(self.db).record_server_change(
+        self.sync.record_server_change(
             memory.user_id,
             "memory",
             memory.id,
@@ -117,7 +118,7 @@ class MemoryService:
         self.db.add(memory)
         self.db.commit()
         self.db.refresh(memory)
-        SyncService(self.db).record_server_change(
+        self.sync.record_server_change(
             memory.user_id,
             "memory",
             memory.id,
@@ -142,7 +143,7 @@ class MemoryService:
         self.db.add(memory)
         self.db.commit()
         self.db.refresh(memory)
-        SyncService(self.db).record_server_change(
+        self.sync.record_server_change(
             memory.user_id,
             "memory",
             memory.id,
@@ -156,7 +157,7 @@ class MemoryService:
     def delete(self, memory_id: UUID, user_id: UUID) -> None:
         memory = self.get_for_user(memory_id, user_id, include_archived=True)
         payload = MemoryOut.model_validate(memory).model_dump(mode="json")
-        SyncService(self.db).record_server_change(user_id, "memory", memory.id, "delete", payload, datetime.utcnow())
+        self.sync.record_server_change(user_id, "memory", memory.id, "delete", payload, datetime.utcnow())
         self.db.delete(memory)
         self.db.commit()
         realtime_sync_service.publish(user_id, "memory.deleted", {"memory": payload})

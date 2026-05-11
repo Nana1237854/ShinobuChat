@@ -13,11 +13,11 @@ def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
 
 
 def get_chat_service(db: Session = Depends(get_db)) -> ChatService:
-    return ChatService(db)
+    return ChatService(db, SyncService(db))
 
 
 def get_memory_service(db: Session = Depends(get_db)) -> MemoryService:
-    return MemoryService(db)
+    return MemoryService(db, SyncService(db))
 
 
 def get_sync_service(db: Session = Depends(get_db)) -> SyncService:
