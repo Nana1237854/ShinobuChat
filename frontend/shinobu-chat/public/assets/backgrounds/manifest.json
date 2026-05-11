@@ -1,0 +1,14 @@
+{
+  "backgrounds": [
+    {
+      "id": "gradient-dusk",
+      "name": "Gradient Dusk",
+      "gradient": "radial-gradient(circle at 28% 20%, rgba(255,255,255,0.72), transparent 22%), linear-gradient(135deg, #d9f0ff 0%, #f9e6ed 48%, #d7e4ff 100%)"
+    },
+    {
+      "id": "quiet-night",
+      "name": "Quiet Night",
+      "gradient": "linear-gradient(135deg, #101827 0%, #27314a 45%, #4d5879 100%)"
+    }
+  ]
+}

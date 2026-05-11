@@ -1,0 +1,13 @@
+{
+  "models": [
+    {
+      "id": "little-seal",
+      "name": "小海豹",
+      "entry": "/assets/live2d/小海豹完整版/小海豹.model3.json",
+      "thumbnail": "/assets/live2d/小海豹完整版/icon1.png",
+      "defaultScale": 0.22,
+      "defaultX": 52,
+      "defaultY": 74
+    }
+  ]
+}
