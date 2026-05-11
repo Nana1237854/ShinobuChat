@@ -401,7 +401,35 @@
       transition: transform 0.18s ease, opacity 0.18s ease;
     }
 
+    .memory-panel {
+      position: absolute;
+      top: calc(var(--edge-gap) + 54px);
+      right: calc(var(--conversation-right) + var(--conversation-width) + 14px);
+      bottom: var(--edge-gap);
+      z-index: 6;
+      width: min(360px, calc(100vw - 48px));
+      display: grid;
+      grid-template-rows: auto auto auto 1fr;
+      gap: 12px;
+      padding: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.56);
+      border-radius: var(--radius-lg);
+      background: rgba(255, 250, 243, 0.84);
+      backdrop-filter: blur(18px);
+      box-shadow: 0 18px 48px rgba(51, 39, 31, 0.16);
+      transform: translateX(28px);
+      opacity: 0;
+      pointer-events: none;
+      transition: transform 0.18s ease, opacity 0.18s ease;
+    }
+
     .live-room.conversation-open .conversation-panel {
+      transform: translateX(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .live-room.memory-open .memory-panel {
       transform: translateX(0);
       opacity: 1;
       pointer-events: auto;
@@ -532,6 +560,115 @@
       gap: 10px;
       padding-right: 4px;
       align-content: start;
+    }
+
+    .memory-list {
+      min-height: 0;
+      overflow: auto;
+      display: grid;
+      gap: 10px;
+      padding-right: 4px;
+      align-content: start;
+    }
+
+    .memory-toolbar,
+    .memory-form,
+    .memory-search {
+      display: grid;
+      gap: 10px;
+    }
+
+    .memory-tabs,
+    .memory-actions,
+    .memory-card-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .memory-tabs {
+      flex-wrap: wrap;
+    }
+
+    .memory-actions {
+      justify-content: space-between;
+    }
+
+    .memory-input,
+    .memory-select,
+    .memory-textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      outline: none;
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.72);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .memory-input,
+    .memory-select {
+      min-height: 38px;
+      padding: 0 12px;
+    }
+
+    .memory-textarea {
+      min-height: 74px;
+      padding: 11px 12px;
+      resize: vertical;
+      line-height: 1.5;
+    }
+
+    .memory-card {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: rgba(255, 252, 247, 0.82);
+    }
+
+    .memory-card.archived {
+      opacity: 0.66;
+    }
+
+    .memory-card-title {
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 900;
+      line-height: 1.35;
+    }
+
+    .memory-card-body {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+      line-height: 1.52;
+    }
+
+    .memory-card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .memory-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .memory-toggle input {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
     }
 
     .history-bubble {
@@ -784,6 +921,15 @@
         width: auto;
       }
 
+      .memory-panel {
+        left: 14px;
+        right: 14px;
+        top: 86px;
+        bottom: 122px;
+        width: auto;
+        z-index: 9;
+      }
+
       .status-orb {
         right: 16px;
         bottom: 12px;
@@ -866,6 +1012,7 @@
         <span class="chip" id="conversationMeta">conversation_id: 未创建</span>
         <div class="top-actions">
           <button class="pill-btn" type="button" id="newConversationBtn">新对话</button>
+          <button class="ghost-btn" type="button" id="openMemoryBtn">记忆中心</button>
           <button class="ghost-btn" type="button" id="openConversationBtn">展开会话</button>
         </div>
       </header>
@@ -890,6 +1037,45 @@
       </section>
 
       <button class="conversation-toggle" type="button" id="conversationToggle" aria-expanded="false" aria-label="打开会话历史">‹</button>
+
+      <aside class="memory-panel" id="memoryPanel" aria-label="记忆中心">
+        <div class="conversation-head">
+          <div class="section-title">Memory Center</div>
+          <label class="memory-toggle">
+            <input id="memoryEnabledToggle" type="checkbox" checked />
+            允许推断
+          </label>
+        </div>
+
+        <section class="memory-toolbar">
+          <div class="memory-tabs">
+            <button class="route-chip active" type="button" data-memory-category="long_term">长期记忆</button>
+            <button class="route-chip" type="button" data-memory-category="emotion_profile">情绪画像</button>
+            <button class="route-chip" type="button" data-memory-category="inspiration">灵感箱</button>
+          </div>
+          <div class="memory-search">
+            <input class="memory-input" id="memorySearchInput" type="search" placeholder="向量检索：输入关键词或一句话" />
+            <div class="memory-actions">
+              <span class="status-note" id="memoryStatus">等待加载记忆。</span>
+              <button class="ghost-btn" type="button" id="memorySearchBtn">检索</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="memory-form">
+          <input class="memory-input" id="memoryTitleInput" type="text" placeholder="标题，例如：偏好的沟通方式" />
+          <textarea class="memory-textarea" id="memoryContentInput" placeholder="写入一条长期记忆、情绪画像或灵感。"></textarea>
+          <div class="memory-actions">
+            <label class="memory-toggle">
+              <input id="memoryInferredInput" type="checkbox" />
+              标记为推断
+            </label>
+            <button class="send-btn" type="button" id="memoryCreateBtn">写入</button>
+          </div>
+        </section>
+
+        <div class="memory-list" id="memoryList"></div>
+      </aside>
 
       <aside class="conversation-panel" id="conversationPanel" aria-label="会话历史侧栏">
         <div class="conversation-head">
@@ -962,7 +1148,8 @@
       demoUser: "shinobu-demo-user",
       conversationId: "shinobu-conversation-id",
       routeMode: "shinobu-route-mode",
-      syncDeviceId: "shinobu-sync-device-id"
+      syncDeviceId: "shinobu-sync-device-id",
+      memoryCategory: "shinobu-memory-category"
     };
 
     const routeModeConfig = {
@@ -988,7 +1175,11 @@
       isStreaming: false,
       pendingAssistantId: null,
       syncSource: null,
-      syncStatus: null
+      syncStatus: null,
+      memoryCategory: localStorage.getItem(storageKeys.memoryCategory) || "long_term",
+      memories: [],
+      memoryEnabled: true,
+      memoryMode: "list"
     };
 
     const liveRoom = document.getElementById("liveRoom");
@@ -996,6 +1187,16 @@
     const historyList = document.getElementById("historyList");
     const conversationToggle = document.getElementById("conversationToggle");
     const openConversationBtn = document.getElementById("openConversationBtn");
+    const openMemoryBtn = document.getElementById("openMemoryBtn");
+    const memoryEnabledToggle = document.getElementById("memoryEnabledToggle");
+    const memorySearchInput = document.getElementById("memorySearchInput");
+    const memorySearchBtn = document.getElementById("memorySearchBtn");
+    const memoryTitleInput = document.getElementById("memoryTitleInput");
+    const memoryContentInput = document.getElementById("memoryContentInput");
+    const memoryInferredInput = document.getElementById("memoryInferredInput");
+    const memoryCreateBtn = document.getElementById("memoryCreateBtn");
+    const memoryList = document.getElementById("memoryList");
+    const memoryStatus = document.getElementById("memoryStatus");
     const modeChip = document.getElementById("modeChip");
     const routeHint = document.getElementById("routeHint");
     const panelRouteHint = document.getElementById("panelRouteHint");
@@ -1048,7 +1249,17 @@
       const source = new EventSource(`${apiBase}/sync/events?${params}`);
       state.syncSource = source;
 
-      ["sync.connected", "presence.changed", "sync.heartbeat", "message.synced"].forEach((eventName) => {
+      [
+        "sync.connected",
+        "presence.changed",
+        "sync.heartbeat",
+        "message.synced",
+        "memory.created",
+        "memory.updated",
+        "memory.inference_undone",
+        "memory.deleted",
+        "memory.preference_updated"
+      ].forEach((eventName) => {
         source.addEventListener(eventName, (event) => {
           const payload = JSON.parse(event.data);
           state.syncStatus = payload;
@@ -1058,6 +1269,9 @@
             if (!exists) {
               appendMessage(payload.message);
             }
+          }
+          if (eventName.startsWith("memory.")) {
+            handleMemoryEvent(eventName, payload);
           }
         });
       });
@@ -1082,6 +1296,14 @@
       conversationToggle.setAttribute("aria-expanded", String(isOpen));
       conversationToggle.textContent = isOpen ? "›" : "‹";
       openConversationBtn.textContent = isOpen ? "收起会话" : "展开会话";
+    }
+
+    function setMemoryPanelOpen(isOpen) {
+      liveRoom.classList.toggle("memory-open", isOpen);
+      openMemoryBtn.textContent = isOpen ? "收起记忆" : "记忆中心";
+      if (isOpen && state.userId) {
+        loadMemoryCenter();
+      }
     }
 
     function syncIdleUiState() {
@@ -1137,6 +1359,17 @@
       });
     }
 
+    function updateMemoryCategory(nextCategory, shouldLoad = true) {
+      state.memoryCategory = nextCategory;
+      localStorage.setItem(storageKeys.memoryCategory, nextCategory);
+      document.querySelectorAll("[data-memory-category]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.memoryCategory === nextCategory);
+      });
+      if (shouldLoad && state.userId) {
+        loadMemories().catch((error) => showToast(error.message || "加载记忆失败"));
+      }
+    }
+
     function updateConversationMeta() {
       const conversationText = state.conversationId
         ? `conversation_id: ${state.conversationId}`
@@ -1185,6 +1418,219 @@
       historyList.scrollTop = historyList.scrollHeight;
       renderChatDock();
       updateConversationMeta();
+    }
+
+    function renderMemories() {
+      memoryList.innerHTML = "";
+      if (!state.memories.length) {
+        const empty = document.createElement("div");
+        empty.className = "memory-card";
+        empty.innerHTML = `
+          <div class="memory-card-title">还没有记忆</div>
+          <div class="memory-card-body">写入一条，或用上方检索框查找相近内容。</div>
+        `;
+        memoryList.appendChild(empty);
+        memoryStatus.textContent = state.memoryMode === "search" ? "没有找到相似记忆。" : "当前分类暂无记忆。";
+        return;
+      }
+
+      state.memories.forEach((item) => {
+        const memory = item.memory || item;
+        const similarity = item.similarity;
+        const card = document.createElement("article");
+        card.className = `memory-card ${memory.archived ? "archived" : ""}`;
+        const meta = [
+          memory.inferred ? `推断 ${Math.round((memory.confidence || 0) * 100)}%` : "手动写入",
+          `重要度 ${memory.importance}`,
+          memory.emotion_label ? `情绪 ${memory.emotion_label}` : "",
+          typeof similarity === "number" ? `相似度 ${Math.round(similarity * 100)}%` : "",
+          memory.archived ? "已撤销/归档" : ""
+        ].filter(Boolean);
+        card.innerHTML = `
+          <div class="memory-card-head">
+            <div class="memory-card-title">${escapeHtml(memory.title)}</div>
+          </div>
+          <div class="memory-card-body">${escapeHtml(memory.content)}</div>
+          <div class="memory-card-meta">${meta.map((part) => `<span>${escapeHtml(part)}</span>`).join("")}</div>
+        `;
+        if (memory.inferred && !memory.archived) {
+          const actions = document.createElement("div");
+          actions.className = "memory-actions";
+          const spacer = document.createElement("span");
+          spacer.className = "status-note";
+          spacer.textContent = "这条来自推断，可撤销。";
+          const undo = document.createElement("button");
+          undo.className = "ghost-btn";
+          undo.type = "button";
+          undo.textContent = "撤销推断";
+          undo.addEventListener("click", () => undoInference(memory.id));
+          actions.append(spacer, undo);
+          card.appendChild(actions);
+        }
+        memoryList.appendChild(card);
+      });
+
+      memoryStatus.textContent = state.memoryMode === "search"
+        ? `找到 ${state.memories.length} 条相似记忆。`
+        : `已加载 ${state.memories.length} 条记忆。`;
+    }
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function handleMemoryEvent(eventName, payload) {
+      if (eventName === "memory.preference_updated") {
+        state.memoryEnabled = Boolean(payload.memory_enabled);
+        memoryEnabledToggle.checked = state.memoryEnabled;
+        return;
+      }
+      if (eventName === "memory.deleted" && payload.memory) {
+        state.memories = state.memories.filter((item) => (item.memory || item).id !== payload.memory.id);
+        renderMemories();
+        return;
+      }
+      if (payload.memory && payload.memory.category === state.memoryCategory) {
+        const next = payload.memory;
+        const index = state.memories.findIndex((item) => (item.memory || item).id === next.id);
+        if (index === -1 && !next.archived) {
+          state.memories.unshift(next);
+        } else if (index !== -1) {
+          state.memories[index] = next;
+        }
+        renderMemories();
+      }
+    }
+
+    async function loadMemoryCenter() {
+      await Promise.all([loadMemorySettings(), loadMemories()]);
+    }
+
+    async function loadMemorySettings() {
+      const response = await fetch(`${apiBase}/memories/settings/${state.userId}`);
+      if (!response.ok) {
+        throw new Error("加载记忆开关失败");
+      }
+      const data = await response.json();
+      state.memoryEnabled = data.enabled;
+      memoryEnabledToggle.checked = data.enabled;
+    }
+
+    async function updateMemorySettings(enabled) {
+      const response = await fetch(`${apiBase}/memories/settings/${state.userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled })
+      });
+      if (!response.ok) {
+        throw new Error("更新记忆开关失败");
+      }
+      const data = await response.json();
+      state.memoryEnabled = data.enabled;
+      memoryEnabledToggle.checked = data.enabled;
+      showToast(data.enabled ? "已恢复记忆推断。" : "已暂停记忆推断。");
+    }
+
+    async function loadMemories() {
+      state.memoryMode = "list";
+      memoryStatus.textContent = "加载记忆中...";
+      const params = new URLSearchParams({
+        category: state.memoryCategory,
+        include_archived: "false"
+      });
+      const response = await fetch(`${apiBase}/memories/user/${state.userId}?${params}`);
+      if (!response.ok) {
+        throw new Error("加载记忆失败");
+      }
+      state.memories = await response.json();
+      renderMemories();
+    }
+
+    async function searchMemories() {
+      const query = memorySearchInput.value.trim();
+      if (!query) {
+        await loadMemories();
+        return;
+      }
+      state.memoryMode = "search";
+      memoryStatus.textContent = "向量检索中...";
+      const response = await fetch(`${apiBase}/memories/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: state.userId,
+          query,
+          category: state.memoryCategory,
+          limit: 8,
+          min_similarity: 0
+        })
+      });
+      if (!response.ok) {
+        throw new Error("记忆检索失败");
+      }
+      state.memories = await response.json();
+      renderMemories();
+    }
+
+    async function createMemory() {
+      const title = memoryTitleInput.value.trim();
+      const content = memoryContentInput.value.trim();
+      if (!title || !content) {
+        showToast("请先填写标题和内容。");
+        return;
+      }
+      const response = await fetch(`${apiBase}/memories`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: state.userId,
+          category: state.memoryCategory,
+          title,
+          content,
+          source: memoryInferredInput.checked ? "inference" : "manual",
+          inferred: memoryInferredInput.checked,
+          confidence: memoryInferredInput.checked ? 0.72 : 1,
+          importance: 3,
+          pinned: false,
+          tags: []
+        })
+      });
+      if (response.status === 409) {
+        showToast("记忆推断已暂停，手动写入请取消“标记为推断”。");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error("写入记忆失败");
+      }
+      const memory = await response.json();
+      state.memories.unshift(memory);
+      memoryTitleInput.value = "";
+      memoryContentInput.value = "";
+      memoryInferredInput.checked = false;
+      renderMemories();
+      showToast("记忆已写入，并已生成向量。");
+    }
+
+    async function undoInference(memoryId) {
+      const response = await fetch(
+        `${apiBase}/memories/${memoryId}/undo-inference?user_id=${encodeURIComponent(state.userId)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        throw new Error("撤销推断失败");
+      }
+      const memory = await response.json();
+      state.memories = state.memories.map((item) => {
+        const current = item.memory || item;
+        return current.id === memory.id ? memory : item;
+      });
+      renderMemories();
+      showToast("已撤销这条推断记忆。");
     }
 
     function setStreamingState(isStreaming, note) {
@@ -1312,6 +1758,7 @@
       try {
         await ensureDemoUser();
         updateRouteMode(state.routeMode);
+        updateMemoryCategory(state.memoryCategory, false);
         updateConversationMeta();
         renderHistory();
         syncIdleUiState();
@@ -1471,6 +1918,11 @@
       setConversationPanelOpen(isOpen);
     });
 
+    openMemoryBtn.addEventListener("click", () => {
+      const isOpen = !liveRoom.classList.contains("memory-open");
+      setMemoryPanelOpen(isOpen);
+    });
+
     newConversationBtn.addEventListener("click", () => {
       resetConversation(true);
       showToast("已切换到新对话，下一条消息会创建新的 conversation_id。");
@@ -1480,6 +1932,48 @@
       button.addEventListener("click", () => {
         updateRouteMode(button.dataset.routeMode);
       });
+    });
+
+    document.querySelectorAll("[data-memory-category]").forEach((button) => {
+      button.addEventListener("click", () => {
+        updateMemoryCategory(button.dataset.memoryCategory);
+      });
+    });
+
+    memoryEnabledToggle.addEventListener("change", async () => {
+      try {
+        await updateMemorySettings(memoryEnabledToggle.checked);
+      } catch (error) {
+        memoryEnabledToggle.checked = state.memoryEnabled;
+        showToast(error.message || "更新记忆开关失败");
+      }
+    });
+
+    memorySearchBtn.addEventListener("click", async () => {
+      try {
+        await searchMemories();
+      } catch (error) {
+        showToast(error.message || "记忆检索失败");
+      }
+    });
+
+    memorySearchInput.addEventListener("keydown", async (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        try {
+          await searchMemories();
+        } catch (error) {
+          showToast(error.message || "记忆检索失败");
+        }
+      }
+    });
+
+    memoryCreateBtn.addEventListener("click", async () => {
+      try {
+        await createMemory();
+      } catch (error) {
+        showToast(error.message || "写入记忆失败");
+      }
     });
 
     window.addEventListener("resize", applyResponsiveLayout);
