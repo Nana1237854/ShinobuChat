@@ -1,4 +1,3 @@
-import json
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -11,7 +10,7 @@ from app.core.db_utils import require_user
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.schemas.message import MessageCreate, MessageRole, RouteMode
-from app.services.realtime_sync_service import realtime_sync_service
+from app.services.realtime_sync_service import realtime_sync_service, format_sse
 from app.services.sync_service import SyncService
 
 
@@ -66,7 +65,7 @@ class ChatService:
         state = self._prepare_stream(payload)
 
         def event_stream():
-            yield self._format_event(
+            yield format_sse(
                 "conversation",
                 {
                     "conversation_id": str(state.conversation.id),
@@ -77,11 +76,11 @@ class ChatService:
             )
 
             for chunk in self._stream_chunks(state.reply_text):
-                yield self._format_event("chunk", {"delta": chunk})
+                yield format_sse("chunk", {"delta": chunk})
                 time.sleep(0.04)
 
             assistant_message = self._save_assistant_message(state)
-            yield self._format_event(
+            yield format_sse(
                 "done",
                 {
                     "conversation_id": str(state.conversation.id),
@@ -216,6 +215,3 @@ class ChatService:
             "created_at": message.created_at.isoformat(),
         }
 
-    def _format_event(self, event: str, payload: dict[str, object]) -> str:
-        data = json.dumps(payload, ensure_ascii=False)
-        return f"event: {event}\ndata: {data}\n\n"

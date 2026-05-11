@@ -15,7 +15,7 @@ from app.schemas.sync import (
     SyncPushResponse,
     SyncStatusOut,
 )
-from app.services.realtime_sync_service import realtime_sync_service
+from app.services.realtime_sync_service import realtime_sync_service, format_sse
 from app.services.sync_service import SyncService
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -40,7 +40,7 @@ async def sync_events(
                     )
                 except queue.Empty:
                     event = realtime_sync_service.heartbeat_event(user_id)
-                yield realtime_sync_service.format_sse(event)
+                yield format_sse(event["type"], event["payload"])
         finally:
             realtime_sync_service.disconnect(subscription)
 

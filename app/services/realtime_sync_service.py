@@ -13,6 +13,11 @@ from app.models.message import Message
 from app.schemas.message import MessageOut
 
 
+def format_sse(event_type: str, payload: dict[str, Any]) -> str:
+    data = json.dumps(payload, ensure_ascii=False)
+    return f"event: {event_type}\ndata: {data}\n\n"
+
+
 @dataclass(frozen=True)
 class SyncSubscription:
     id: str
@@ -124,12 +129,6 @@ class RealtimeSyncService:
             "queued_apns_notifications": queued_apns_notifications,
             "ios_synced": online_ios_devices > 0 or ios_push_targets > 0,
         }
-
-    def format_sse(self, event: dict[str, Any]) -> str:
-        return (
-            f"event: {event['type']}\n"
-            f"data: {json.dumps(event['payload'], ensure_ascii=False)}\n\n"
-        )
 
     def heartbeat_event(self, user_id: UUID) -> dict[str, Any]:
         return self._event(
