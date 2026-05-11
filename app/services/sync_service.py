@@ -8,12 +8,12 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.db_utils import require_user
 from app.models.conversation import Conversation
 from app.models.memory import Memory
 from app.models.message import Message
 from app.models.sync import SyncOperation, SyncRecord
 from app.models.todo import Todo
-from app.models.user import User
 from app.schemas.memory import MemoryOut
 from app.schemas.message import MessageOut
 from app.schemas.sync import (
@@ -33,7 +33,7 @@ class SyncService:
         self.db = db
 
     def push(self, payload: SyncPushRequest) -> SyncPushResponse:
-        self._require_user(payload.user_id)
+        require_user(self.db, payload.user_id)
         if payload.last_seen_version == 0:
             self._backfill_existing(payload.user_id)
         results: list[SyncPushResult] = []
@@ -53,7 +53,7 @@ class SyncService:
         )
 
     def pull(self, user_id: UUID, since_version: int, device_id: str | None = None) -> SyncPullResponse:
-        self._require_user(user_id)
+        require_user(self.db, user_id)
         if since_version == 0:
             self._backfill_existing(user_id)
         server_version = self.current_version(user_id)
@@ -439,11 +439,6 @@ class SyncService:
         if not value:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{key} is required")
         return UUID(str(value))
-
-    def _require_user(self, user_id: UUID) -> None:
-        user = self.db.query(User).filter(User.id == user_id).first()
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     def _optional_str(self, value: Any) -> str | None:
         if value is None:

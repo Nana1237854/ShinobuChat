@@ -4,9 +4,7 @@ from datetime import datetime
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.config import settings
 from app.db.session import Base
-from app.db.vector import Vector
 
 
 class Memory(Base):
@@ -28,7 +26,7 @@ class Memory(Base):
     archived_reason: Mapped[str | None] = mapped_column(String(80), nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     embedding_model: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(settings.memory_embedding_dimensions), nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
     last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)

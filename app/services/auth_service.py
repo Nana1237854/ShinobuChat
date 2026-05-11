@@ -7,6 +7,7 @@ from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.db_utils import require_user
 from app.models.device import Device
 from app.models.user import User
 from app.schemas.user import UserCreate
@@ -40,10 +41,8 @@ class AuthService:
         return user
 
     def get_user_by_id(self, user_id: UUID) -> User:
-        user = self.db.query(User).filter(User.id == user_id).first()
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-        return user
+        require_user(self.db, user_id)
+        return self.db.query(User).filter(User.id == user_id).first()
 
     def register_device(self, user_id: UUID, device_code: str, device_name: str, device_type: str) -> Device:
         device = Device(

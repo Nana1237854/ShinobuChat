@@ -8,9 +8,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.vector import format_vector
 from app.models.memory import Memory
 from app.schemas.memory import MemoryCategory, MemoryOut, MemorySearchHit
+
+
+def _format_vector(value: list[float]) -> str:
+    return "[" + ",".join(f"{item:.8f}" for item in value) + "]"
 
 
 class EmbeddingService:
@@ -93,7 +96,7 @@ class EmbeddingService:
         filters = ["user_id = :user_id", "embedding IS NOT NULL"]
         params: dict[str, object] = {
             "user_id": user_id,
-            "query_embedding": format_vector(query_embedding),
+            "query_embedding": _format_vector(query_embedding),
             "limit": limit,
         }
         if category:

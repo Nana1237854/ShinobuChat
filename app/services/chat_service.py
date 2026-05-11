@@ -7,9 +7,9 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.db_utils import require_user
 from app.models.conversation import Conversation
 from app.models.message import Message
-from app.models.user import User
 from app.schemas.message import MessageCreate, MessageRole, RouteMode
 from app.services.realtime_sync_service import realtime_sync_service
 from app.services.sync_service import SyncService
@@ -44,6 +44,7 @@ class ChatService:
         return conversation
 
     def list_conversations(self, user_id: UUID) -> list[Conversation]:
+        require_user(self.db, user_id)
         return (
             self.db.query(Conversation)
             .filter(Conversation.user_id == user_id)
@@ -90,9 +91,7 @@ class ChatService:
         return event_stream()
 
     def _prepare_stream(self, payload: MessageCreate) -> MessageStreamState:
-        user = self.db.query(User).filter(User.id == payload.user_id).first()
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        require_user(self.db, payload.user_id)
 
         conversation = self._resolve_conversation(payload)
         user_message = Message(
@@ -109,7 +108,7 @@ class ChatService:
         self.db.commit()
         self.db.refresh(conversation)
         self.db.refresh(user_message)
-        self._record_message_change(user.id, user_message)
+        self._record_message_change(payload.user_id, user_message)
 
         history = self.get_messages(conversation.id, payload.user_id)
         reply_text = self._build_reply(payload.content.strip(), payload.route_mode, history[:-1])

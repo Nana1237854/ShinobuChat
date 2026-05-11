@@ -7,8 +7,8 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.db_utils import require_user
 from app.models.memory import Memory, MemoryPreference
-from app.models.user import User
 from app.schemas.memory import (
     MemoryCategory,
     MemoryCreate,
@@ -29,7 +29,7 @@ class MemoryService:
         self.embedding = EmbeddingService(db)
 
     def create(self, payload: MemoryCreate) -> Memory:
-        self._require_user(payload.user_id)
+        require_user(self.db, payload.user_id)
         self._ensure_inference_allowed(payload.user_id, payload.inferred)
         embedding = self.embedding.embed(f"{payload.title} {payload.content} {' '.join(payload.tags)}")
         memory = Memory(
@@ -67,7 +67,7 @@ class MemoryService:
         category: MemoryCategory | None = None,
         include_archived: bool = False,
     ) -> list[Memory]:
-        self._require_user(user_id)
+        require_user(self.db, user_id)
         query = self.db.query(Memory).filter(Memory.user_id == user_id)
         if category:
             query = query.filter(Memory.category == category.value)
@@ -76,7 +76,7 @@ class MemoryService:
         return query.order_by(Memory.pinned.desc(), Memory.updated_at.desc()).all()
 
     def search(self, payload: MemorySearchRequest) -> list[MemorySearchHit]:
-        self._require_user(payload.user_id)
+        require_user(self.db, payload.user_id)
         query_embedding = self.embedding.embed(payload.query)
         return self.embedding.search(
             payload.user_id,
@@ -171,7 +171,7 @@ class MemoryService:
         return memory
 
     def get_preferences(self, user_id: UUID) -> MemoryPreference:
-        self._require_user(user_id)
+        require_user(self.db, user_id)
         preference = self.db.query(MemoryPreference).filter(MemoryPreference.user_id == user_id).first()
         if preference:
             return preference
@@ -201,11 +201,6 @@ class MemoryService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Memory inference is paused for this user",
             )
-
-    def _require_user(self, user_id: UUID) -> None:
-        user = self.db.query(User).filter(User.id == user_id).first()
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     def _publish(self, event_type: str, memory: Memory) -> None:
         realtime_sync_service.publish(
