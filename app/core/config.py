@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     memory_embedding_dimensions: int = 384
     memory_embedding_model: str = "local-hash-v1"
     memory_search_default_limit: int = 8
+    memory_pgvector_enabled: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="SC_")
 

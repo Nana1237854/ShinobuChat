@@ -2,13 +2,15 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.api import api_router
 from app.core.config import settings
 from app.db.init_db import init_db
 
-PROTOTYPE_PATH = Path(__file__).resolve().parent.parent / "shinobuchat_prototype.html"
+FRONTEND_DIST = (
+    Path(__file__).resolve().parent.parent / "frontend" / "shinobu-chat" / "dist"
+)
 
 
 def create_app() -> FastAPI:
@@ -30,9 +32,12 @@ def create_app() -> FastAPI:
     async def health_check() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/", include_in_schema=False)
-    async def prototype() -> FileResponse:
-        return FileResponse(PROTOTYPE_PATH)
+    # Serve frontend static files as catch-all (after API routes)
+    app.mount(
+        "/",
+        StaticFiles(directory=str(FRONTEND_DIST), html=True),
+        name="frontend",
+    )
 
     return app
 

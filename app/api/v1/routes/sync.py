@@ -2,16 +2,21 @@ import queue
 from uuid import UUID
 
 import anyio
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
+from app.api.deps import get_sync_service
 from app.core.config import settings
 from app.schemas.sync import (
     ApnsRegistrationRequest,
     ApnsRegistrationResponse,
+    SyncPullResponse,
+    SyncPushRequest,
+    SyncPushResponse,
     SyncStatusOut,
 )
 from app.services.realtime_sync_service import realtime_sync_service
+from app.services.sync_service import SyncService
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -94,3 +99,21 @@ def register_apns_target(payload: ApnsRegistrationRequest) -> ApnsRegistrationRe
 @router.get("/status/{user_id}", response_model=SyncStatusOut)
 def sync_status(user_id: UUID) -> SyncStatusOut:
     return SyncStatusOut.model_validate(realtime_sync_service.status_payload(user_id))
+
+
+@router.post("/push", response_model=SyncPushResponse)
+def push_changes(
+    payload: SyncPushRequest,
+    sync_service: SyncService = Depends(get_sync_service),
+) -> SyncPushResponse:
+    return sync_service.push(payload)
+
+
+@router.get("/pull/{user_id}", response_model=SyncPullResponse)
+def pull_changes(
+    user_id: UUID,
+    since_version: int = Query(default=0, ge=0),
+    device_id: str | None = Query(default=None, min_length=1, max_length=128),
+    sync_service: SyncService = Depends(get_sync_service),
+) -> SyncPullResponse:
+    return sync_service.pull(user_id, since_version, device_id)

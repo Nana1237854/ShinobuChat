@@ -24,6 +24,7 @@ from app.schemas.memory import (
     MemoryUpdate,
 )
 from app.services.realtime_sync_service import realtime_sync_service
+from app.services.sync_service import SyncService
 
 
 class MemoryService:
@@ -52,6 +53,14 @@ class MemoryService:
         self.db.add(memory)
         self.db.commit()
         self.db.refresh(memory)
+        SyncService(self.db).record_server_change(
+            memory.user_id,
+            "memory",
+            memory.id,
+            "upsert",
+            MemoryOut.model_validate(memory).model_dump(mode="json"),
+            memory.updated_at,
+        )
         self._publish("memory.created", memory)
         return memory
 
@@ -72,7 +81,11 @@ class MemoryService:
     def search(self, payload: MemorySearchRequest) -> list[MemorySearchHit]:
         self._require_user(payload.user_id)
         query_embedding = self._embed_text(payload.query)
-        if self.db.bind and self.db.bind.dialect.name == "postgresql":
+        if (
+            settings.memory_pgvector_enabled
+            and self.db.bind
+            and self.db.bind.dialect.name == "postgresql"
+        ):
             return self._search_pgvector(payload, query_embedding)
         return self._search_in_python(payload, query_embedding)
 
@@ -106,6 +119,14 @@ class MemoryService:
         self.db.add(memory)
         self.db.commit()
         self.db.refresh(memory)
+        SyncService(self.db).record_server_change(
+            memory.user_id,
+            "memory",
+            memory.id,
+            "upsert",
+            MemoryOut.model_validate(memory).model_dump(mode="json"),
+            memory.updated_at,
+        )
         self._publish("memory.updated", memory)
         return memory
 
@@ -123,12 +144,21 @@ class MemoryService:
         self.db.add(memory)
         self.db.commit()
         self.db.refresh(memory)
+        SyncService(self.db).record_server_change(
+            memory.user_id,
+            "memory",
+            memory.id,
+            "upsert",
+            MemoryOut.model_validate(memory).model_dump(mode="json"),
+            memory.updated_at,
+        )
         self._publish("memory.inference_undone", memory)
         return memory
 
     def delete(self, memory_id: UUID, user_id: UUID) -> None:
         memory = self.get_for_user(memory_id, user_id, include_archived=True)
         payload = MemoryOut.model_validate(memory).model_dump(mode="json")
+        SyncService(self.db).record_server_change(user_id, "memory", memory.id, "delete", payload, datetime.utcnow())
         self.db.delete(memory)
         self.db.commit()
         realtime_sync_service.publish(user_id, "memory.deleted", {"memory": payload})

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import JSON
 from sqlalchemy.types import UserDefinedType
+
+from app.core.config import settings
 
 try:
     from pgvector.sqlalchemy import Vector as PgVector
@@ -35,6 +38,8 @@ class FallbackVector(UserDefinedType):
 
 
 def Vector(dimensions: int):
-    if PgVector is not None:
+    if settings.memory_pgvector_enabled and PgVector is not None:
         return PgVector(dimensions)
-    return FallbackVector(dimensions)
+    if settings.memory_pgvector_enabled:
+        return FallbackVector(dimensions)
+    return JSON

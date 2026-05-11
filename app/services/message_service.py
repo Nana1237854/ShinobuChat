@@ -12,6 +12,7 @@ from app.models.user import User
 from app.schemas.message import MessageCreate, MessageRole, RouteMode
 from app.services.conversation_service import ConversationService
 from app.services.realtime_sync_service import realtime_sync_service
+from app.services.sync_service import SyncService
 
 
 @dataclass
@@ -47,6 +48,14 @@ class MessageService:
         self.db.commit()
         self.db.refresh(conversation)
         self.db.refresh(user_message)
+        SyncService(self.db).record_server_change(
+            user.id,
+            "messages",
+            user_message.id,
+            "upsert",
+            self._serialize_message(user_message),
+            user_message.created_at,
+        )
         realtime_sync_service.publish_message(user.id, user_message)
 
         history = self.conversations.list_messages(conversation.id, payload.user_id)
@@ -79,6 +88,14 @@ class MessageService:
         self.db.commit()
         self.db.refresh(state.conversation)
         self.db.refresh(assistant_message)
+        SyncService(self.db).record_server_change(
+            state.conversation.user_id,
+            "messages",
+            assistant_message.id,
+            "upsert",
+            self._serialize_message(assistant_message),
+            assistant_message.created_at,
+        )
         realtime_sync_service.publish_message(state.conversation.user_id, assistant_message)
         return assistant_message
 
