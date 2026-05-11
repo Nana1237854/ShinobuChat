@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.api.v1.api import api_router
+from app.api.v1.routes import live2d as live2d_routes
 from app.core.config import settings
 from app.db.init_db import init_db
 
@@ -21,6 +22,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(api_router, prefix=settings.api_v1_prefix)
+    app.include_router(live2d_routes.router, prefix="/api")
 
     @app.on_event("startup")
     async def startup_event() -> None:

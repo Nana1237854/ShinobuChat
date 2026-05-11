@@ -1,4 +1,5 @@
 ﻿from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -7,6 +8,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "ShinobuChat Core API"
     api_v1_prefix: str = "/api/v1"
+    live2d_assets_dir: Path = (
+        Path(__file__).resolve().parents[2]
+        / "frontend"
+        / "shinobu-chat"
+        / "public"
+        / "assets"
+        / "live2d"
+    )
 
     database_url: str = Field(
         default="postgresql+psycopg://postgres:postgres@localhost:5432/shinobuchat"

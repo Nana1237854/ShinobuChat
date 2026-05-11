@@ -3,6 +3,13 @@ export type MessageRole = 'user' | 'assistant' | 'system';
 export type ReminderMode = 'none' | 'toast' | 'sound';
 export type AvatarTool = 'lollipop' | 'fist' | 'hammer';
 
+export type Live2DEmotionMappingItem = {
+  expression?: string;
+  motion?: string;
+};
+
+export type Live2DEmotionMapping = Record<string, Live2DEmotionMappingItem>;
+
 export type AuthSession = {
   accessToken: string;
   userId: string;
@@ -25,6 +32,7 @@ export type ApiMessage = {
   role: MessageRole;
   content: string;
   route_mode?: RouteMode | null;
+  emotion?: string | null;
   created_at: string;
 };
 
@@ -60,6 +68,7 @@ export type Live2DModelItem = {
   defaultScale?: number;
   defaultX?: number;
   defaultY?: number;
+  emotionMapping?: Live2DEmotionMapping;
 };
 
 export type BackgroundItem = {

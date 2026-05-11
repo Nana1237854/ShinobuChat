@@ -5,6 +5,7 @@ import { clamp } from './settings';
 type Live2DStageProps = {
   model?: Live2DModelItem;
   settings: PetSettings;
+  activeEmotion?: string | null;
   activeTool: AvatarTool | null;
   onSettingsChange: (settings: PetSettings) => void;
   onInteract: () => void;
@@ -22,6 +23,8 @@ type LoadedRuntime = {
     scale?: { set: (value: number) => void };
     anchor?: { set: (x: number, y: number) => void };
     position?: { set: (x: number, y: number) => void };
+    expression?: (id?: number | string) => Promise<boolean>;
+    motion?: (group: string, index?: number) => Promise<boolean>;
     alpha?: number;
   };
 };
@@ -44,6 +47,47 @@ function ensureCubism4Core(): Promise<void> {
   });
 
   return cubismCorePromise;
+}
+
+function normalizeEmotion(emotion?: string | null): string {
+  return (emotion || 'neutral').trim().toLowerCase().replace(/\s+/g, '_') || 'neutral';
+}
+
+function parseMotionRef(motion: string): { group: string; index?: number } {
+  const bracketMatch = /^(.+)\[(\d+)\]$/.exec(motion);
+  if (bracketMatch) {
+    return { group: bracketMatch[1], index: Number(bracketMatch[2]) };
+  }
+
+  const colonMatch = /^(.+):(\d+)$/.exec(motion);
+  if (colonMatch) {
+    return { group: colonMatch[1], index: Number(colonMatch[2]) };
+  }
+
+  return { group: motion };
+}
+
+function applyLive2DEmotion(runtime: LoadedRuntime | null, model: Live2DModelItem | undefined, emotion?: string | null) {
+  const mapping = model?.emotionMapping;
+  const modelObject = runtime?.modelObject;
+  if (!mapping || !modelObject) return;
+
+  const normalized = normalizeEmotion(emotion);
+  const mappedEmotion = mapping[normalized] ?? mapping.neutral;
+  if (!mappedEmotion) return;
+
+  if (mappedEmotion.expression && modelObject.expression) {
+    modelObject.expression(mappedEmotion.expression).catch(error => {
+      console.warn(`Failed to apply Live2D expression "${mappedEmotion.expression}"`, error);
+    });
+  }
+
+  if (mappedEmotion.motion && modelObject.motion) {
+    const { group, index } = parseMotionRef(mappedEmotion.motion);
+    modelObject.motion(group, index).catch(error => {
+      console.warn(`Failed to apply Live2D motion "${mappedEmotion.motion}"`, error);
+    });
+  }
 }
 
 async function createLive2DRuntime(container: HTMLDivElement, model: Live2DModelItem, settings: PetSettings): Promise<LoadedRuntime> {
@@ -81,12 +125,14 @@ async function createLive2DRuntime(container: HTMLDivElement, model: Live2DModel
 export function Live2DStage({
   model,
   settings,
+  activeEmotion,
   activeTool,
   onSettingsChange,
   onInteract,
 }: Live2DStageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<LoadedRuntime | null>(null);
+  const emotionRef = useRef<string | null | undefined>(activeEmotion);
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -112,6 +158,7 @@ export function Live2DStage({
           return;
         }
         runtimeRef.current = runtime;
+        applyLive2DEmotion(runtime, model, emotionRef.current);
       })
       .catch(nextError => {
         if (!cancelled) {
@@ -129,6 +176,11 @@ export function Live2DStage({
       container.replaceChildren();
     };
   }, [model?.entry]);
+
+  useEffect(() => {
+    emotionRef.current = activeEmotion;
+    applyLive2DEmotion(runtimeRef.current, model, activeEmotion);
+  }, [activeEmotion, model?.emotionMapping]);
 
   useEffect(() => {
     const container = containerRef.current;

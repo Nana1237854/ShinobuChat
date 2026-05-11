@@ -74,6 +74,7 @@ export default function App() {
   const [petSettings, setPetSettings] = useState<PetSettings>(() => loadPetSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeTool, setActiveTool] = useState<AvatarTool | null>(null);
+  const [activeEmotion, setActiveEmotion] = useState<string | null>(null);
   const [petFeedback, setPetFeedback] = useState<string | null>(null);
   const [galgameMode, setGalgameMode] = useState(false);
 
@@ -201,6 +202,12 @@ export default function App() {
     }
   };
 
+  const updateAvatarEmotion = (message?: ApiMessage | null) => {
+    if (message?.emotion) {
+      setActiveEmotion(message.emotion);
+    }
+  };
+
   const sendText = async (text: string) => {
     if (!session || streaming) return;
     const content = text.trim();
@@ -224,6 +231,7 @@ export default function App() {
               const exists = current.some(item => item.id === event.payload.user_message.id);
               return exists ? current : [...current, toChatMessage(event.payload.user_message)];
             });
+            updateAvatarEmotion(event.payload.user_message);
             refreshConversations();
           }
           if (event.type === 'chunk') {
@@ -252,6 +260,7 @@ export default function App() {
               ...current.filter(item => item.id !== pendingId),
               toChatMessage(event.payload.assistant_message),
             ]);
+            updateAvatarEmotion(event.payload.assistant_message);
             refreshConversations();
           }
         },
@@ -314,6 +323,7 @@ export default function App() {
         <Live2DStage
           model={selectedModel}
           settings={petSettings}
+          activeEmotion={activeEmotion}
           activeTool={activeTool}
           onSettingsChange={setPetSettings}
           onInteract={handlePetInteraction}
