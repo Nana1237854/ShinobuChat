@@ -129,6 +129,16 @@
       color: var(--mint-ink);
     }
 
+    .chip.offline {
+      color: var(--accent-deep);
+      background: rgba(255, 238, 227, 0.92);
+    }
+
+    .chip.queue {
+      color: #6f5a47;
+      background: rgba(248, 240, 230, 0.92);
+    }
+
     .chip.strong {
       color: var(--accent-deep);
     }
@@ -321,6 +331,69 @@
       border: 1px dashed rgba(141, 63, 45, 0.2);
       color: var(--muted);
       background: rgba(255, 250, 244, 0.5);
+    }
+
+    .message-body {
+      display: grid;
+      gap: 8px;
+    }
+
+    .message-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .message-badge,
+    .message-sync {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: 0.02em;
+    }
+
+    .message-badge {
+      border: 1px solid rgba(122, 88, 58, 0.16);
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.62);
+    }
+
+    .message-badge.companion {
+      color: var(--mint-ink);
+      background: rgba(220, 239, 230, 0.92);
+    }
+
+    .message-badge.task {
+      color: #fff8ef;
+      background: linear-gradient(135deg, var(--accent), #b84a29);
+      border-color: transparent;
+    }
+
+    .message-sync {
+      border: 1px solid rgba(122, 88, 58, 0.14);
+      color: var(--muted);
+      background: rgba(248, 242, 235, 0.92);
+    }
+
+    .message-sync.pending,
+    .message-sync.sending {
+      color: #8d5a33;
+      background: rgba(255, 241, 218, 0.95);
+    }
+
+    .message-sync.failed {
+      color: #8f3d29;
+      background: rgba(255, 229, 220, 0.96);
+    }
+
+    .message-copy {
+      white-space: pre-wrap;
+      word-break: break-word;
     }
 
     .streaming-badge {
@@ -543,6 +616,10 @@
     .history-bubble.assistant {
       border: 1px solid var(--line);
       background: rgba(255, 252, 247, 0.84);
+    }
+
+    .history-bubble .message-meta {
+      margin-bottom: 2px;
     }
 
     .conversation-composer,
@@ -947,37 +1024,61 @@
     </section>
   </main>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
   <script>
     const apiBase = "/api/v1";
+    const sqlJsCdnRoot = "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3";
+    const RouteModeValue = {
+      AUTO: "auto",
+      CHAT: "chat",
+      AGENT: "agent"
+    };
+
     const storageKeys = {
       demoUser: "shinobu-demo-user",
       conversationId: "shinobu-conversation-id",
-      routeMode: "shinobu-route-mode"
+      conversationKey: "shinobu-conversation-key",
+      routeMode: "shinobu-route-mode",
+      fallbackMessages: "shinobu-cache-fallback-messages",
+      fallbackPending: "shinobu-cache-fallback-pending"
     };
 
     const routeModeConfig = {
       auto: {
         label: "自动决策",
-        hint: "自动决策：首条消息默认创建会话，后续沿用当前 conversation_id。"
+        hint: "自动识别陪伴/任务意图；离线时先本地保存并排队同步。"
       },
       chat: {
         label: "纯聊天",
-        hint: "纯聊天：只保留对话推进，不强调任务化拆解。"
+        hint: "纯聊天：消息标记为 companion，并优先保持轻量对话。"
       },
       agent: {
         label: "强制 Agent",
-        hint: "强制 Agent：每条消息都按任务处理口径组织回复。"
+        hint: "强制 Agent：消息标记为 task，并按任务处理口径组织回复。"
       }
     };
+
+    const taskKeywords = ["帮我", "安排", "提醒", "创建", "记录", "总结", "生成", "计划", "todo", "待办", "任务", "同步"];
+    const messageCategoryLabels = { companion: "Companion", task: "Task" };
+    const syncStatusLabels = { pending: "待同步", sending: "同步中", failed: "同步失败" };
 
     const state = {
       userId: null,
       conversationId: localStorage.getItem(storageKeys.conversationId),
-      routeMode: localStorage.getItem(storageKeys.routeMode) || "auto",
+      conversationKey: localStorage.getItem(storageKeys.conversationKey) || null,
+      routeMode: localStorage.getItem(storageKeys.routeMode) || RouteModeValue.AUTO,
       messages: [],
-      isStreaming: false,
-      pendingAssistantId: null
+      pendingQueueCount: 0,
+      isFlushing: false,
+      pendingAssistant: null,
+      cacheMode: "loading",
+      lastError: null,
+      bootstrapComplete: false
     };
+
+    if (!state.conversationKey && state.conversationId) {
+      state.conversationKey = `server:${state.conversationId}`;
+    }
 
     const liveRoom = document.getElementById("liveRoom");
     const chatDock = document.getElementById("chatDock");
@@ -999,10 +1100,595 @@
     const toastStack = document.getElementById("toastStack");
     const messageInput = document.getElementById("messageInput");
     const panelMessageInput = document.getElementById("panelMessageInput");
-    const sendBtn = document.getElementById("sendBtn");
     const panelSendBtn = document.getElementById("panelSendBtn");
     const newConversationBtn = document.getElementById("newConversationBtn");
     const composerForm = document.getElementById("composerForm");
+    const statusOrb = document.getElementById("statusOrb");
+
+    const cacheAdapter = {
+      storageMode: "loading",
+      SQL: null,
+      db: null,
+      fallback: {
+        messages: [],
+        pending: []
+      },
+
+      async init() {
+        try {
+          if (typeof window.initSqlJs !== "function") {
+            throw new Error("sql.js unavailable");
+          }
+          this.SQL = await window.initSqlJs({
+            locateFile: (file) => `${sqlJsCdnRoot}/${file}`
+          });
+          await this.load();
+          this.storageMode = "sqlite";
+        } catch (error) {
+          console.warn("SQLite cache unavailable, fallback to localStorage.", error);
+          this.storageMode = "fallback";
+          this.loadFallback();
+          this.ensureSchema();
+          await this.save();
+        }
+        return this.storageMode;
+      },
+
+      async load() {
+        const bytes = await this.loadDatabaseBytes();
+        this.db = bytes ? new this.SQL.Database(bytes) : new this.SQL.Database();
+        this.ensureSchema();
+      },
+
+      ensureSchema() {
+        if (this.storageMode === "fallback") {
+          this.fallback.messages = Array.isArray(this.fallback.messages) ? this.fallback.messages : [];
+          this.fallback.pending = Array.isArray(this.fallback.pending) ? this.fallback.pending : [];
+          return;
+        }
+
+        this.db.run(`
+          CREATE TABLE IF NOT EXISTS messages (
+            local_id INTEGER PRIMARY KEY,
+            client_message_id TEXT UNIQUE NOT NULL,
+            server_message_id TEXT NULL,
+            conversation_key TEXT NOT NULL,
+            conversation_id TEXT NULL,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            route_mode TEXT NOT NULL,
+            message_category TEXT NOT NULL,
+            sync_status TEXT NOT NULL,
+            error_message TEXT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+
+          CREATE TABLE IF NOT EXISTS pending_sync (
+            client_message_id TEXT PRIMARY KEY,
+            conversation_key TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT NULL,
+            next_retry_at TEXT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_messages_conversation_key ON messages (conversation_key);
+          CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages (created_at);
+          CREATE INDEX IF NOT EXISTS idx_pending_sync_created_at ON pending_sync (created_at);
+        `);
+      },
+
+      async save() {
+        if (this.storageMode === "fallback") {
+          localStorage.setItem(storageKeys.fallbackMessages, JSON.stringify(this.fallback.messages));
+          localStorage.setItem(storageKeys.fallbackPending, JSON.stringify(this.fallback.pending));
+          return;
+        }
+
+        const bytes = this.db.export();
+        await this.saveDatabaseBytes(bytes);
+      },
+
+      loadFallback() {
+        try {
+          this.fallback.messages = JSON.parse(localStorage.getItem(storageKeys.fallbackMessages) || "[]");
+        } catch (error) {
+          this.fallback.messages = [];
+        }
+
+        try {
+          this.fallback.pending = JSON.parse(localStorage.getItem(storageKeys.fallbackPending) || "[]");
+        } catch (error) {
+          this.fallback.pending = [];
+        }
+      },
+
+      async listMessages(conversationKey = null) {
+        if (this.storageMode === "fallback") {
+          const items = conversationKey
+            ? this.fallback.messages.filter((message) => message.conversation_key === conversationKey)
+            : this.fallback.messages.slice();
+          return items.map(normalizeMessageRecord).sort(compareMessages);
+        }
+
+        const rows = conversationKey
+          ? this.queryAll(
+              `SELECT * FROM messages WHERE conversation_key = ? ORDER BY datetime(created_at) ASC, local_id ASC`,
+              [conversationKey]
+            )
+          : this.queryAll(`SELECT * FROM messages ORDER BY datetime(created_at) ASC, local_id ASC`);
+        return rows.map(normalizeMessageRecord);
+      },
+
+      async getLatestConversationKey() {
+        if (this.storageMode === "fallback") {
+          const latest = this.fallback.messages.slice().sort(compareMessages).pop();
+          return latest ? latest.conversation_key : null;
+        }
+
+        const rows = this.queryAll(
+          `SELECT conversation_key FROM messages ORDER BY datetime(created_at) DESC, local_id DESC LIMIT 1`
+        );
+        return rows.length ? String(rows[0].conversation_key) : null;
+      },
+
+      async findMessage(clientMessageId) {
+        const key = String(clientMessageId);
+        if (this.storageMode === "fallback") {
+          const match = this.fallback.messages.find((message) => String(message.client_message_id) === key);
+          return match ? normalizeMessageRecord(match) : null;
+        }
+
+        const rows = this.queryAll(`SELECT * FROM messages WHERE client_message_id = ? LIMIT 1`, [key]);
+        return rows.length ? normalizeMessageRecord(rows[0]) : null;
+      },
+
+      async upsertMessage(message) {
+        const record = normalizeMessageRecord(message);
+        if (this.storageMode === "fallback") {
+          const index = this.fallback.messages.findIndex(
+            (item) => String(item.client_message_id) === String(record.client_message_id)
+          );
+          if (index === -1) {
+            this.fallback.messages.push(record);
+          } else {
+            this.fallback.messages[index] = { ...this.fallback.messages[index], ...record };
+          }
+          this.fallback.messages.sort(compareMessages);
+          await this.save();
+          return record;
+        }
+
+        this.db.run(
+          `
+            INSERT INTO messages (
+              client_message_id,
+              server_message_id,
+              conversation_key,
+              conversation_id,
+              user_id,
+              role,
+              content,
+              route_mode,
+              message_category,
+              sync_status,
+              error_message,
+              created_at,
+              updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(client_message_id) DO UPDATE SET
+              server_message_id = excluded.server_message_id,
+              conversation_key = excluded.conversation_key,
+              conversation_id = excluded.conversation_id,
+              user_id = excluded.user_id,
+              role = excluded.role,
+              content = excluded.content,
+              route_mode = excluded.route_mode,
+              message_category = excluded.message_category,
+              sync_status = excluded.sync_status,
+              error_message = excluded.error_message,
+              created_at = excluded.created_at,
+              updated_at = excluded.updated_at
+          `,
+          [
+            record.client_message_id,
+            record.server_message_id,
+            record.conversation_key,
+            record.conversation_id,
+            record.user_id,
+            record.role,
+            record.content,
+            record.route_mode,
+            record.message_category,
+            record.sync_status,
+            record.error_message,
+            record.created_at,
+            record.updated_at
+          ]
+        );
+        await this.save();
+        return record;
+      },
+
+      async enqueuePending(entry) {
+        const normalized = normalizePendingEntry(entry);
+        if (this.storageMode === "fallback") {
+          const index = this.fallback.pending.findIndex(
+            (item) => String(item.client_message_id) === String(normalized.client_message_id)
+          );
+          if (index === -1) {
+            this.fallback.pending.push(normalized);
+          } else {
+            this.fallback.pending[index] = { ...this.fallback.pending[index], ...normalized };
+          }
+          this.fallback.pending.sort(comparePendingEntries);
+          await this.save();
+          return normalized;
+        }
+
+        this.db.run(
+          `
+            INSERT INTO pending_sync (
+              client_message_id,
+              conversation_key,
+              payload_json,
+              attempt_count,
+              last_error,
+              next_retry_at,
+              created_at,
+              updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(client_message_id) DO UPDATE SET
+              conversation_key = excluded.conversation_key,
+              payload_json = excluded.payload_json,
+              attempt_count = excluded.attempt_count,
+              last_error = excluded.last_error,
+              next_retry_at = excluded.next_retry_at,
+              created_at = excluded.created_at,
+              updated_at = excluded.updated_at
+          `,
+          [
+            normalized.client_message_id,
+            normalized.conversation_key,
+            normalized.payload_json,
+            normalized.attempt_count,
+            normalized.last_error,
+            normalized.next_retry_at,
+            normalized.created_at,
+            normalized.updated_at
+          ]
+        );
+        await this.save();
+        return normalized;
+      },
+
+      async dequeuePending(clientMessageId) {
+        const key = String(clientMessageId);
+        if (this.storageMode === "fallback") {
+          this.fallback.pending = this.fallback.pending.filter(
+            (item) => String(item.client_message_id) !== key
+          );
+          await this.save();
+          return;
+        }
+
+        this.db.run(`DELETE FROM pending_sync WHERE client_message_id = ?`, [key]);
+        await this.save();
+      },
+
+      async listPendingSync() {
+        if (this.storageMode === "fallback") {
+          return this.fallback.pending.slice().sort(comparePendingEntries).map(normalizePendingEntry);
+        }
+
+        const rows = this.queryAll(
+          `SELECT * FROM pending_sync ORDER BY datetime(created_at) ASC, client_message_id ASC`
+        );
+        return rows.map(normalizePendingEntry);
+      },
+
+      async getPendingCount() {
+        const rows = await this.listPendingSync();
+        return rows.length;
+      },
+
+      async promoteConversationKey(sourceConversationKey, targetConversationKey, conversationId) {
+        if (!sourceConversationKey) {
+          return;
+        }
+
+        if (this.storageMode === "fallback") {
+          this.fallback.messages = this.fallback.messages.map((message) => {
+            if (message.conversation_key !== sourceConversationKey) {
+              return message;
+            }
+            return normalizeMessageRecord({
+              ...message,
+              conversation_key: targetConversationKey,
+              conversation_id: conversationId,
+              updated_at: nowIso()
+            });
+          });
+          this.fallback.pending = this.fallback.pending.map((entry) => {
+            if (entry.conversation_key !== sourceConversationKey) {
+              return entry;
+            }
+            const payload = JSON.parse(entry.payload_json);
+            payload.conversation_id = conversationId;
+            return normalizePendingEntry({
+              ...entry,
+              conversation_key: targetConversationKey,
+              payload_json: JSON.stringify(payload),
+              updated_at: nowIso()
+            });
+          });
+          await this.save();
+          return;
+        }
+
+        this.db.run(
+          `UPDATE messages SET conversation_key = ?, conversation_id = ?, updated_at = ? WHERE conversation_key = ?`,
+          [targetConversationKey, conversationId, nowIso(), sourceConversationKey]
+        );
+
+        const pendingRows = this.queryAll(`SELECT * FROM pending_sync WHERE conversation_key = ?`, [sourceConversationKey]);
+        pendingRows.forEach((row) => {
+          const payload = JSON.parse(String(row.payload_json));
+          payload.conversation_id = conversationId;
+          this.db.run(
+            `UPDATE pending_sync SET conversation_key = ?, payload_json = ?, updated_at = ? WHERE client_message_id = ?`,
+            [targetConversationKey, JSON.stringify(payload), nowIso(), row.client_message_id]
+          );
+        });
+        await this.save();
+      },
+
+      async rebindConversationKey(sourceConversationKey, targetConversationKey) {
+        if (!sourceConversationKey || sourceConversationKey === targetConversationKey) {
+          return;
+        }
+
+        if (this.storageMode === "fallback") {
+          this.fallback.messages = this.fallback.messages.map((message) => {
+            if (message.conversation_key !== sourceConversationKey) {
+              return message;
+            }
+            return normalizeMessageRecord({
+              ...message,
+              conversation_key: targetConversationKey,
+              conversation_id: null,
+              updated_at: nowIso()
+            });
+          });
+          this.fallback.pending = this.fallback.pending.map((entry) => {
+            if (entry.conversation_key !== sourceConversationKey) {
+              return entry;
+            }
+            const payload = JSON.parse(entry.payload_json);
+            payload.conversation_id = null;
+            return normalizePendingEntry({
+              ...entry,
+              conversation_key: targetConversationKey,
+              payload_json: JSON.stringify(payload),
+              last_error: null,
+              next_retry_at: null,
+              updated_at: nowIso()
+            });
+          });
+          await this.save();
+          return;
+        }
+
+        this.db.run(
+          `UPDATE messages SET conversation_key = ?, conversation_id = NULL, updated_at = ? WHERE conversation_key = ?`,
+          [targetConversationKey, nowIso(), sourceConversationKey]
+        );
+
+        const pendingRows = this.queryAll(`SELECT * FROM pending_sync WHERE conversation_key = ?`, [sourceConversationKey]);
+        pendingRows.forEach((row) => {
+          const payload = JSON.parse(String(row.payload_json));
+          payload.conversation_id = null;
+          this.db.run(
+            `UPDATE pending_sync SET conversation_key = ?, payload_json = ?, last_error = NULL, next_retry_at = NULL, updated_at = ? WHERE client_message_id = ?`,
+            [targetConversationKey, JSON.stringify(payload), nowIso(), row.client_message_id]
+          );
+        });
+        await this.save();
+      },
+
+      async flushQueue(handler) {
+        const pending = await this.listPendingSync();
+        for (const item of pending) {
+          const shouldContinue = await handler(item);
+          if (shouldContinue === false) {
+            break;
+          }
+        }
+      },
+
+      queryAll(sql, params = []) {
+        const statement = this.db.prepare(sql, params);
+        const rows = [];
+        while (statement.step()) {
+          rows.push(statement.getAsObject());
+        }
+        statement.free();
+        return rows;
+      },
+
+      async loadDatabaseBytes() {
+        const db = await this.openIndexedDb();
+        return await new Promise((resolve, reject) => {
+          const transaction = db.transaction("files", "readonly");
+          const store = transaction.objectStore("files");
+          const request = store.get("sqlite-cache");
+          request.onsuccess = () => resolve(request.result || null);
+          request.onerror = () => reject(request.error || new Error("IndexedDB read failed"));
+        });
+      },
+
+      async saveDatabaseBytes(bytes) {
+        const db = await this.openIndexedDb();
+        await new Promise((resolve, reject) => {
+          const transaction = db.transaction("files", "readwrite");
+          const store = transaction.objectStore("files");
+          const request = store.put(bytes, "sqlite-cache");
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error || new Error("IndexedDB write failed"));
+        });
+      },
+
+      async openIndexedDb() {
+        return await new Promise((resolve, reject) => {
+          const request = indexedDB.open("shinobu-sqlite-cache", 1);
+          request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains("files")) {
+              db.createObjectStore("files");
+            }
+          };
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error || new Error("IndexedDB open failed"));
+        });
+      }
+    };
+
+    function nowIso() {
+      return new Date().toISOString();
+    }
+
+    function normalizeIso(value) {
+      return value ? new Date(value).toISOString() : nowIso();
+    }
+
+    function compareMessages(left, right) {
+      const leftTime = new Date(left.created_at).getTime();
+      const rightTime = new Date(right.created_at).getTime();
+      if (leftTime !== rightTime) {
+        return leftTime - rightTime;
+      }
+      return getMessageIdentity(left).localeCompare(getMessageIdentity(right));
+    }
+
+    function comparePendingEntries(left, right) {
+      const leftTime = new Date(left.created_at).getTime();
+      const rightTime = new Date(right.created_at).getTime();
+      if (leftTime !== rightTime) {
+        return leftTime - rightTime;
+      }
+      return String(left.client_message_id).localeCompare(String(right.client_message_id));
+    }
+
+    function normalizeMessageRecord(record) {
+      return {
+        id: record.id ? String(record.id) : null,
+        client_message_id: String(record.client_message_id || record.id || crypto.randomUUID()),
+        server_message_id: record.server_message_id ? String(record.server_message_id) : (record.id ? String(record.id) : null),
+        conversation_key: String(record.conversation_key || state.conversationKey || `local:${crypto.randomUUID()}`),
+        conversation_id: record.conversation_id ? String(record.conversation_id) : null,
+        user_id: String(record.user_id || state.userId || ""),
+        role: String(record.role || "assistant"),
+        content: String(record.content || ""),
+        route_mode: String(record.route_mode || RouteModeValue.AUTO),
+        message_category: String(record.message_category || "companion"),
+        sync_status: String(record.sync_status || "synced"),
+        error_message: record.error_message ? String(record.error_message) : null,
+        created_at: normalizeIso(record.created_at),
+        updated_at: normalizeIso(record.updated_at || record.created_at),
+        ephemeral: Boolean(record.ephemeral),
+        source_client_message_id: record.source_client_message_id ? String(record.source_client_message_id) : null
+      };
+    }
+
+    function normalizePendingEntry(entry) {
+      return {
+        client_message_id: String(entry.client_message_id),
+        conversation_key: String(entry.conversation_key),
+        payload_json: typeof entry.payload_json === "string" ? entry.payload_json : JSON.stringify(entry.payload_json),
+        attempt_count: Number(entry.attempt_count || 0),
+        last_error: entry.last_error ? String(entry.last_error) : null,
+        next_retry_at: entry.next_retry_at ? normalizeIso(entry.next_retry_at) : null,
+        created_at: normalizeIso(entry.created_at),
+        updated_at: normalizeIso(entry.updated_at || entry.created_at)
+      };
+    }
+
+    function getMessageIdentity(message) {
+      return String(message.client_message_id || message.id || "");
+    }
+
+    function isContextActive(conversationKey) {
+      return Boolean(state.conversationKey && state.conversationKey === conversationKey);
+    }
+
+    function isClientMessageVisible(clientMessageId) {
+      return state.messages.some((message) => getMessageIdentity(message) === String(clientMessageId));
+    }
+
+    function rebindConversationState(sourceConversationKey, targetConversationKey) {
+      if (!sourceConversationKey || sourceConversationKey === targetConversationKey) {
+        return;
+      }
+
+      state.messages = state.messages.map((message) => {
+        if (message.conversation_key !== sourceConversationKey) {
+          return message;
+        }
+        return normalizeMessageRecord({
+          ...message,
+          conversation_key: targetConversationKey,
+          conversation_id: null,
+          updated_at: nowIso()
+        });
+      });
+      state.messages.sort(compareMessages);
+
+      if (state.conversationKey === sourceConversationKey) {
+        state.conversationKey = targetConversationKey;
+        state.conversationId = null;
+      }
+    }
+
+    function getCurrentConversationText() {
+      if (state.conversationId) {
+        return `conversation_id: ${state.conversationId}`;
+      }
+      if (state.conversationKey) {
+        return "conversation_id: 待服务端分配";
+      }
+      return "conversation_id: 未创建";
+    }
+
+    function buildConversationKey() {
+      return `local:${crypto.randomUUID()}`;
+    }
+
+    function buildPendingPayload(message) {
+      return {
+        client_message_id: message.client_message_id,
+        user_id: message.user_id,
+        content: message.content,
+        conversation_id: message.conversation_id,
+        route_mode: message.route_mode,
+        message_category: message.message_category
+      };
+    }
+
+    function classifyMessageCategory(content, routeMode) {
+      if (routeMode === RouteModeValue.CHAT) {
+        return "companion";
+      }
+      if (routeMode === RouteModeValue.AGENT) {
+        return "task";
+      }
+
+      const normalized = content.toLowerCase();
+      return taskKeywords.some((keyword) => normalized.includes(keyword.toLowerCase())) ? "task" : "companion";
+    }
 
     function showToast(message) {
       const toast = document.createElement("div");
@@ -1020,7 +1706,7 @@
     }
 
     function syncIdleUiState() {
-      liveRoom.classList.toggle("idle-ui", !state.isStreaming);
+      liveRoom.classList.toggle("idle-ui", !state.isFlushing && !state.pendingAssistant);
     }
 
     function applyResponsiveLayout() {
@@ -1071,14 +1757,64 @@
       });
     }
 
+    function syncConversationStorage() {
+      if (state.conversationId) {
+        localStorage.setItem(storageKeys.conversationId, state.conversationId);
+      } else {
+        localStorage.removeItem(storageKeys.conversationId);
+      }
+
+      if (state.conversationKey) {
+        localStorage.setItem(storageKeys.conversationKey, state.conversationKey);
+      } else {
+        localStorage.removeItem(storageKeys.conversationKey);
+      }
+    }
+
     function updateConversationMeta() {
-      const conversationText = state.conversationId
-        ? `conversation_id: ${state.conversationId}`
-        : "conversation_id: 未创建";
-      conversationMeta.textContent = conversationText;
-      panelConversationMeta.textContent = state.conversationId || "未创建 conversation_id";
-      conversationModeMeta.textContent = state.conversationId ? "多轮上下文中" : "单轮待开始";
-      messageCountMeta.textContent = String(state.messages.length);
+      conversationMeta.textContent = getCurrentConversationText();
+      panelConversationMeta.textContent = state.conversationId || (state.conversationKey ? "等待服务端分配" : "未创建 conversation_id");
+      if (state.conversationId) {
+        conversationModeMeta.textContent = "多轮上下文中";
+      } else if (state.conversationKey) {
+        conversationModeMeta.textContent = "本地会话待同步";
+      } else {
+        conversationModeMeta.textContent = "单轮待开始";
+      }
+      messageCountMeta.textContent = String(state.messages.filter((message) => !message.ephemeral).length);
+      syncConversationStorage();
+    }
+
+    function createMessageBody(message) {
+      const body = document.createElement("div");
+      body.className = "message-body";
+
+      const meta = document.createElement("div");
+      meta.className = "message-meta";
+
+      if (message.message_category) {
+        const categoryBadge = document.createElement("span");
+        categoryBadge.className = `message-badge ${message.message_category}`;
+        categoryBadge.textContent = messageCategoryLabels[message.message_category] || message.message_category;
+        meta.appendChild(categoryBadge);
+      }
+
+      if (message.sync_status && message.sync_status !== "synced") {
+        const syncBadge = document.createElement("span");
+        syncBadge.className = `message-sync ${message.sync_status}`;
+        syncBadge.textContent = syncStatusLabels[message.sync_status] || message.sync_status;
+        meta.appendChild(syncBadge);
+      }
+
+      if (meta.childNodes.length > 0) {
+        body.appendChild(meta);
+      }
+
+      const copy = document.createElement("div");
+      copy.className = "message-copy";
+      copy.textContent = message.content;
+      body.appendChild(copy);
+      return body;
     }
 
     function renderChatDock() {
@@ -1095,7 +1831,7 @@
       dockMessages.forEach((message) => {
         const bubble = document.createElement("div");
         bubble.className = `bubble ${message.role === "user" ? "user" : "shinobu"}`;
-        bubble.textContent = message.content;
+        bubble.appendChild(createMessageBody(message));
         chatDock.appendChild(bubble);
       });
     }
@@ -1111,7 +1847,7 @@
         state.messages.forEach((message) => {
           const bubble = document.createElement("div");
           bubble.className = `history-bubble ${message.role === "user" ? "user" : "assistant"}`;
-          bubble.textContent = message.content;
+          bubble.appendChild(createMessageBody(message));
           historyList.appendChild(bubble);
         });
       }
@@ -1121,69 +1857,134 @@
       updateConversationMeta();
     }
 
-    function setStreamingState(isStreaming, note) {
-      state.isStreaming = isStreaming;
-      messageInput.disabled = isStreaming;
-      panelMessageInput.disabled = isStreaming;
-      sendBtn.disabled = isStreaming;
-      panelSendBtn.disabled = isStreaming;
-      newConversationBtn.disabled = isStreaming;
-      streamingBadge.hidden = !isStreaming;
-      historyStateChip.textContent = isStreaming ? "SSE 返回中" : "等待消息";
-      streamStatus.textContent = note;
+    function updateStatusOrb() {
+      const primary = !navigator.onLine
+        ? state.pendingQueueCount > 0 ? `${state.pendingQueueCount} 条待同步` : "离线缓存中"
+        : state.pendingQueueCount > 0 ? `${state.pendingQueueCount} 条排队` : "队列空闲";
+      const secondary = state.isFlushing ? "正在自动推送" : state.pendingAssistant ? "回复流式返回中" : "自动同步已就绪";
+      const tertiary = state.cacheMode === "sqlite" ? "SQLite Cache" : state.cacheMode === "fallback" ? "Fallback Cache" : "缓存初始化中";
+      statusOrb.innerHTML = `<strong>${primary}</strong><span>${secondary}</span><span>${tertiary}</span>`;
+    }
+
+    function refreshConnectionUi() {
+      const isOnline = navigator.onLine;
+      let chipClass = "chip online";
+      let chipText = "已连接原型后端";
+
+      if (!isOnline) {
+        chipClass = "chip offline";
+        chipText = state.pendingQueueCount > 0 ? `离线缓存 ${state.pendingQueueCount}` : "离线模式";
+      } else if (state.isFlushing) {
+        chipClass = "chip queue";
+        chipText = `同步中 ${state.pendingQueueCount}`;
+      } else if (state.pendingQueueCount > 0) {
+        chipClass = "chip queue";
+        chipText = `待同步 ${state.pendingQueueCount}`;
+      } else if (state.cacheMode === "fallback") {
+        chipClass = "chip queue";
+        chipText = "已连接（降级缓存）";
+      }
+
+      if (state.lastError && isOnline && !state.isFlushing) {
+        chipClass = "chip offline";
+        chipText = "同步异常";
+      }
+
+      connectionChip.className = chipClass;
+      connectionChip.textContent = chipText;
+
+      if (state.isFlushing || state.pendingAssistant) {
+        historyStateChip.textContent = "SSE 返回中";
+        streamStatus.textContent = `正在同步消息队列，剩余 ${state.pendingQueueCount} 条。`;
+      } else if (!isOnline) {
+        historyStateChip.textContent = state.pendingQueueCount > 0 ? `离线队列 ${state.pendingQueueCount}` : "离线缓存中";
+        streamStatus.textContent = "当前离线：新消息会先写入本地 SQLite，恢复联网后自动推送。";
+      } else if (state.pendingQueueCount > 0) {
+        historyStateChip.textContent = `待同步 ${state.pendingQueueCount}`;
+        streamStatus.textContent = `${state.pendingQueueCount} 条消息已入队，系统会顺序自动推送。`;
+      } else {
+        historyStateChip.textContent = "等待消息";
+        streamStatus.textContent = "空闲中，可以发送新消息。";
+      }
+
+      streamingBadge.hidden = !(state.isFlushing || state.pendingAssistant);
       syncIdleUiState();
+      updateStatusOrb();
+    }
+
+    function upsertMessageInState(message) {
+      const normalized = normalizeMessageRecord(message);
+      const index = state.messages.findIndex((item) => getMessageIdentity(item) === getMessageIdentity(normalized));
+      if (index === -1) {
+        state.messages.push(normalized);
+      } else {
+        state.messages[index] = { ...state.messages[index], ...normalized };
+      }
+      state.messages.sort(compareMessages);
+      renderHistory();
+    }
+
+    function removeMessageFromState(clientMessageId) {
+      state.messages = state.messages.filter((item) => getMessageIdentity(item) !== String(clientMessageId));
+      renderHistory();
+    }
+
+    function clearPendingAssistant(context = null) {
+      if (!state.pendingAssistant) {
+        return;
+      }
+      if (context && state.pendingAssistant.source_client_message_id !== context.clientMessageId) {
+        return;
+      }
+      removeMessageFromState(state.pendingAssistant.client_message_id);
+      state.pendingAssistant = null;
+    }
+
+    function upsertPendingAssistant(delta, context) {
+      if (!isContextActive(context.conversationKey) && !isClientMessageVisible(context.clientMessageId)) {
+        return;
+      }
+
+      if (!state.pendingAssistant || state.pendingAssistant.source_client_message_id !== context.clientMessageId) {
+        state.pendingAssistant = normalizeMessageRecord({
+          client_message_id: `pending:${context.clientMessageId}`,
+          conversation_key: context.conversationKey,
+          conversation_id: state.conversationId,
+          user_id: state.userId,
+          role: "assistant",
+          content: "",
+          route_mode: context.routeMode,
+          message_category: context.messageCategory,
+          sync_status: "sending",
+          created_at: nowIso(),
+          updated_at: nowIso(),
+          ephemeral: true,
+          source_client_message_id: context.clientMessageId
+        });
+      }
+
+      state.pendingAssistant.content += delta;
+      state.pendingAssistant.updated_at = nowIso();
+      upsertMessageInState(state.pendingAssistant);
+      refreshConnectionUi();
     }
 
     function resetConversation(clearMessages = true) {
       state.conversationId = null;
-      localStorage.removeItem(storageKeys.conversationId);
+      state.conversationKey = null;
+      state.pendingAssistant = null;
       if (clearMessages) {
         state.messages = [];
         renderHistory();
       }
       updateConversationMeta();
+      refreshConnectionUi();
     }
 
     function resetClientState() {
       state.userId = null;
       localStorage.removeItem(storageKeys.demoUser);
       resetConversation(true);
-    }
-
-    function appendMessage(message) {
-      const exists = state.messages.some((item) => item.id === message.id);
-      if (!exists) {
-        state.messages.push(message);
-      }
-      renderHistory();
-    }
-
-    function upsertPendingAssistant(delta) {
-      if (!state.pendingAssistantId) {
-        state.pendingAssistantId = `pending-${Date.now()}`;
-        state.messages.push({
-          id: state.pendingAssistantId,
-          role: "assistant",
-          content: "",
-          conversation_id: state.conversationId,
-          route_mode: state.routeMode,
-          created_at: new Date().toISOString()
-        });
-      }
-
-      const pending = state.messages.find((item) => item.id === state.pendingAssistantId);
-      if (pending) {
-        pending.content += delta;
-      }
-      renderHistory();
-    }
-
-    function finalizeAssistantMessage(message) {
-      if (state.pendingAssistantId) {
-        state.messages = state.messages.filter((item) => item.id !== state.pendingAssistantId);
-        state.pendingAssistantId = null;
-      }
-      appendMessage(message);
     }
 
     async function ensureDemoUser(forceRefresh = false) {
@@ -1200,6 +2001,10 @@
             localStorage.removeItem(storageKeys.demoUser);
           }
         }
+      }
+
+      if (!navigator.onLine) {
+        throw new Error("离线且未找到本地身份");
       }
 
       const payload = {
@@ -1224,45 +2029,66 @@
       return data.id;
     }
 
-    async function loadConversationMessages(conversationId) {
-      const response = await fetch(
-        `${apiBase}/conversations/${conversationId}/messages?user_id=${encodeURIComponent(state.userId)}`
-      );
-      if (response.status === 404) {
-        resetConversation(true);
-        showToast("原有 conversation_id 已失效，已切回新对话状态。");
+    async function hydrateConversationFromCache() {
+      let conversationKey = state.conversationKey;
+      if (!conversationKey) {
+        conversationKey = await cacheAdapter.getLatestConversationKey();
+      }
+
+      if (!conversationKey) {
+        state.messages = [];
+        renderHistory();
         return;
       }
-      if (!response.ok) {
-        throw new Error("加载消息历史失败");
-      }
-      const messages = await response.json();
+
+      state.conversationKey = conversationKey;
+      const messages = await cacheAdapter.listMessages(conversationKey);
       state.messages = messages;
+      const lastServerMessage = [...messages].reverse().find((message) => message.conversation_id);
+      state.conversationId = lastServerMessage ? lastServerMessage.conversation_id : null;
       renderHistory();
     }
 
-    async function bootstrap(retry = true) {
-      connectionChip.textContent = "连接中...";
-      try {
-        await ensureDemoUser();
-        updateRouteMode(state.routeMode);
-        updateConversationMeta();
-        renderHistory();
-        syncIdleUiState();
-        if (state.conversationId) {
-          await loadConversationMessages(state.conversationId);
+    async function reconcilePendingMessages() {
+      const pendingItems = await cacheAdapter.listPendingSync();
+      state.pendingQueueCount = pendingItems.length;
+
+      for (const item of pendingItems) {
+        const message = await cacheAdapter.findMessage(item.client_message_id);
+        if (!message) {
+          continue;
         }
-        connectionChip.textContent = "已连接原型后端";
-      } catch (error) {
-        if (retry) {
-          resetClientState();
-          await bootstrap(false);
-          return;
+
+        const queuedMessage = normalizeMessageRecord({
+          ...message,
+          sync_status: "pending",
+          error_message: null,
+          updated_at: nowIso()
+        });
+        await cacheAdapter.upsertMessage(queuedMessage);
+        if (isContextActive(queuedMessage.conversation_key) || isClientMessageVisible(queuedMessage.client_message_id)) {
+          upsertMessageInState(queuedMessage);
         }
-        const message = error instanceof Error ? error.message : "初始化失败";
-        connectionChip.textContent = `连接失败: ${message}`;
-        showToast(message);
       }
+    }
+
+    function createLocalMessageFromServer(message, overrides = {}) {
+      return normalizeMessageRecord({
+        id: message.id,
+        client_message_id: message.client_message_id,
+        server_message_id: message.id,
+        conversation_key: overrides.conversation_key || state.conversationKey || `server:${message.conversation_id}`,
+        conversation_id: message.conversation_id,
+        user_id: overrides.user_id || state.userId || "",
+        role: message.role,
+        content: message.content,
+        route_mode: message.route_mode,
+        message_category: message.message_category,
+        sync_status: overrides.sync_status || "synced",
+        error_message: overrides.error_message || null,
+        created_at: message.created_at,
+        updated_at: overrides.updated_at || message.created_at
+      });
     }
 
     function parseSseEvent(rawEvent) {
@@ -1282,7 +2108,77 @@
       return { eventName, payload };
     }
 
-    async function consumeSse(response) {
+    async function handleStreamEvent(eventName, payload, context) {
+      if (eventName === "conversation") {
+        const serverConversationId = payload.conversation_id;
+        const targetConversationKey = `server:${serverConversationId}`;
+        const sourceConversationKey = context.conversationKey;
+
+        if (sourceConversationKey !== targetConversationKey) {
+          await cacheAdapter.promoteConversationKey(sourceConversationKey, targetConversationKey, serverConversationId);
+          context.conversationKey = targetConversationKey;
+        }
+
+        if (isContextActive(sourceConversationKey) || isClientMessageVisible(context.clientMessageId)) {
+          state.conversationId = serverConversationId;
+          state.conversationKey = context.conversationKey;
+          setConversationPanelOpen(true);
+        }
+
+        const userMessage = createLocalMessageFromServer(payload.user_message, {
+          conversation_key: context.conversationKey,
+          user_id: state.userId,
+          sync_status: "synced"
+        });
+        await cacheAdapter.upsertMessage(userMessage);
+        if (isContextActive(context.conversationKey) || isClientMessageVisible(context.clientMessageId)) {
+          upsertMessageInState(userMessage);
+        }
+        refreshConnectionUi();
+        return;
+      }
+
+      if (eventName === "chunk") {
+        upsertPendingAssistant(payload.delta || "", context);
+        return;
+      }
+
+      if (eventName === "done") {
+        clearPendingAssistant(context);
+        const assistantMessage = createLocalMessageFromServer(payload.assistant_message, {
+          conversation_key: context.conversationKey,
+          user_id: state.userId,
+          sync_status: "synced"
+        });
+        await cacheAdapter.upsertMessage(assistantMessage);
+
+        const userMessage = await cacheAdapter.findMessage(context.clientMessageId);
+        if (userMessage) {
+          const syncedUserMessage = normalizeMessageRecord({
+            ...userMessage,
+            conversation_key: context.conversationKey,
+            conversation_id: state.conversationId || userMessage.conversation_id,
+            sync_status: "synced",
+            error_message: null,
+            updated_at: assistantMessage.created_at
+          });
+          await cacheAdapter.upsertMessage(syncedUserMessage);
+          if (isContextActive(context.conversationKey) || isClientMessageVisible(context.clientMessageId)) {
+            upsertMessageInState(syncedUserMessage);
+          }
+        }
+
+        await cacheAdapter.dequeuePending(context.clientMessageId);
+        state.pendingQueueCount = await cacheAdapter.getPendingCount();
+        state.lastError = null;
+        if (isContextActive(context.conversationKey) || isClientMessageVisible(context.clientMessageId)) {
+          upsertMessageInState(assistantMessage);
+        }
+        refreshConnectionUi();
+      }
+    }
+
+    async function consumeSse(response, context) {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -1300,45 +2196,91 @@
           buffer = buffer.slice(boundary + 2);
           if (rawEvent) {
             const { eventName, payload } = parseSseEvent(rawEvent);
-            handleStreamEvent(eventName, payload);
+            await handleStreamEvent(eventName, payload, context);
           }
           boundary = buffer.indexOf("\n\n");
         }
       }
     }
 
-    function handleStreamEvent(eventName, payload) {
-      if (eventName === "conversation") {
-        state.conversationId = payload.conversation_id;
-        localStorage.setItem(storageKeys.conversationId, payload.conversation_id);
-        appendMessage(payload.user_message);
-        updateConversationMeta();
-        setConversationPanelOpen(true);
-        return;
+    async function recoverMissingRemoteState(item, payload, existingMessage) {
+      const sourceConversationKey = item.conversation_key;
+      const nextConversationKey = sourceConversationKey.startsWith("server:") ? buildConversationKey() : sourceConversationKey;
+      await ensureDemoUser(true);
+
+      if (sourceConversationKey !== nextConversationKey) {
+        await cacheAdapter.rebindConversationKey(sourceConversationKey, nextConversationKey);
+        rebindConversationState(sourceConversationKey, nextConversationKey);
       }
 
-      if (eventName === "chunk") {
-        upsertPendingAssistant(payload.delta || "");
-        return;
+      if (existingMessage) {
+        const reboundMessage = normalizeMessageRecord({
+          ...existingMessage,
+          user_id: state.userId,
+          conversation_key: nextConversationKey,
+          conversation_id: null,
+          sync_status: "pending",
+          error_message: null,
+          updated_at: nowIso()
+        });
+        await cacheAdapter.upsertMessage(reboundMessage);
+        if (isContextActive(sourceConversationKey) || isContextActive(nextConversationKey) || isClientMessageVisible(existingMessage.client_message_id)) {
+          upsertMessageInState(reboundMessage);
+        }
       }
 
-      if (eventName === "done") {
-        finalizeAssistantMessage(payload.assistant_message);
-        updateConversationMeta();
-      }
+      await cacheAdapter.enqueuePending({
+        ...item,
+        conversation_key: nextConversationKey,
+        payload_json: JSON.stringify({
+          ...payload,
+          user_id: state.userId,
+          conversation_id: null
+        }),
+        last_error: null,
+        next_retry_at: null,
+        updated_at: nowIso()
+      });
+      state.pendingQueueCount = await cacheAdapter.getPendingCount();
+      refreshConnectionUi();
+      showToast("本地身份已刷新，消息将自动重试。");
+      window.setTimeout(() => {
+        flushPendingQueue();
+      }, 0);
     }
 
-    async function sendMessage(content) {
-      const trimmed = content.trim();
-      if (!trimmed || state.isStreaming) {
-        return;
+    function clearComposer() {
+      messageInput.value = "";
+      panelMessageInput.value = "";
+    }
+
+    async function processPendingItem(item) {
+      const payload = JSON.parse(item.payload_json);
+      const context = {
+        clientMessageId: String(payload.client_message_id),
+        conversationKey: item.conversation_key,
+        routeMode: String(payload.route_mode),
+        messageCategory: String(payload.message_category)
+      };
+
+      const existingMessage = await cacheAdapter.findMessage(context.clientMessageId);
+      if (existingMessage) {
+        const sendingMessage = normalizeMessageRecord({
+          ...existingMessage,
+          sync_status: "sending",
+          error_message: null,
+          updated_at: nowIso()
+        });
+        await cacheAdapter.upsertMessage(sendingMessage);
+        if (isContextActive(context.conversationKey) || isClientMessageVisible(context.clientMessageId)) {
+          upsertMessageInState(sendingMessage);
+        }
       }
 
-      if (!state.userId) {
-        await ensureDemoUser();
-      }
+      state.isFlushing = true;
+      state.lastError = null;
+      refreshConnectionUi();
 
-      setStreamingState(true, "Shinobu 正在通过 SSE 流式返回内容...");
       try {
         const response = await fetch(`${apiBase}/messages`, {
           method: "POST",
@@ -1348,33 +2290,168 @@
           },
           body: JSON.stringify({
             user_id: state.userId,
-            conversation_id: state.conversationId,
-            content: trimmed,
-            route_mode: state.routeMode
+            client_message_id: payload.client_message_id,
+            conversation_id: payload.conversation_id,
+            content: payload.content,
+            route_mode: payload.route_mode,
+            message_category: payload.message_category
           })
         });
 
         if (response.status === 404) {
-          localStorage.removeItem(storageKeys.demoUser);
-          if (state.conversationId) {
-            resetConversation(false);
-          }
-          await ensureDemoUser(true);
-          throw new Error("用户或会话已失效，请重新发送一次。");
+          await recoverMissingRemoteState(item, payload, existingMessage);
+          return false;
         }
 
         if (!response.ok || !response.body) {
-          throw new Error("消息接口返回失败");
+          throw new Error(response.status === 404 ? "服务端未找到用户或会话" : "消息接口返回失败");
         }
 
-        messageInput.value = "";
-        panelMessageInput.value = "";
-        await consumeSse(response);
-        showToast("消息已通过 SSE 完成返回。");
+        await consumeSse(response, context);
+        return true;
       } catch (error) {
-        showToast(error.message || "发送失败");
+        clearPendingAssistant(context);
+        const isOfflineError = !navigator.onLine || error instanceof TypeError;
+        const errorMessage = error instanceof Error ? error.message : "同步失败";
+        state.lastError = errorMessage;
+
+        if (existingMessage) {
+          const failedMessage = normalizeMessageRecord({
+            ...existingMessage,
+            sync_status: isOfflineError ? "pending" : "failed",
+            error_message: isOfflineError ? null : errorMessage,
+            updated_at: nowIso()
+          });
+          await cacheAdapter.upsertMessage(failedMessage);
+          if (isContextActive(context.conversationKey) || isClientMessageVisible(context.clientMessageId)) {
+            upsertMessageInState(failedMessage);
+          }
+        }
+
+        await cacheAdapter.enqueuePending({
+          ...item,
+          attempt_count: Number(item.attempt_count || 0) + 1,
+          last_error: isOfflineError ? null : errorMessage,
+          next_retry_at: null,
+          updated_at: nowIso()
+        });
+        state.pendingQueueCount = await cacheAdapter.getPendingCount();
+        refreshConnectionUi();
+        if (!isOfflineError) {
+          showToast(errorMessage);
+        }
+        return false;
       } finally {
-        setStreamingState(false, "空闲中，可以发送新消息。");
+        state.isFlushing = false;
+        refreshConnectionUi();
+      }
+    }
+
+    async function flushPendingQueue() {
+      if (!state.bootstrapComplete || !navigator.onLine || state.isFlushing || !state.userId) {
+        refreshConnectionUi();
+        return;
+      }
+
+      await cacheAdapter.flushQueue(async (item) => {
+        if (!navigator.onLine) {
+          return false;
+        }
+        if (item.next_retry_at && new Date(item.next_retry_at).getTime() > Date.now()) {
+          return true;
+        }
+        return await processPendingItem(item);
+      });
+
+      state.pendingQueueCount = await cacheAdapter.getPendingCount();
+      refreshConnectionUi();
+    }
+
+    async function sendMessage(content) {
+      const trimmed = content.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      if (!state.userId) {
+        try {
+          await ensureDemoUser();
+        } catch (error) {
+          showToast("当前离线且没有可用身份，暂时无法发送。");
+          return;
+        }
+      }
+
+      if (!state.conversationKey) {
+        state.conversationKey = state.conversationId ? `server:${state.conversationId}` : buildConversationKey();
+      }
+
+      const category = classifyMessageCategory(trimmed, state.routeMode);
+      const createdAt = nowIso();
+      const message = normalizeMessageRecord({
+        client_message_id: crypto.randomUUID(),
+        conversation_key: state.conversationKey,
+        conversation_id: state.conversationId,
+        user_id: state.userId,
+        role: "user",
+        content: trimmed,
+        route_mode: state.routeMode,
+        message_category: category,
+        sync_status: "pending",
+        error_message: null,
+        created_at: createdAt,
+        updated_at: createdAt
+      });
+
+      upsertMessageInState(message);
+      await cacheAdapter.upsertMessage(message);
+      await cacheAdapter.enqueuePending({
+        client_message_id: message.client_message_id,
+        conversation_key: message.conversation_key,
+        payload_json: JSON.stringify(buildPendingPayload(message)),
+        attempt_count: 0,
+        last_error: null,
+        next_retry_at: null,
+        created_at: createdAt,
+        updated_at: createdAt
+      });
+
+      state.pendingQueueCount = await cacheAdapter.getPendingCount();
+      updateConversationMeta();
+      refreshConnectionUi();
+      clearComposer();
+
+      if (!navigator.onLine) {
+        showToast("已离线缓存，恢复联网后会自动推送。");
+        return;
+      }
+
+      await flushPendingQueue();
+    }
+
+    async function bootstrap(retry = true) {
+      connectionChip.textContent = "初始化缓存中...";
+      try {
+        state.cacheMode = await cacheAdapter.init();
+        await ensureDemoUser();
+        updateRouteMode(state.routeMode);
+        await hydrateConversationFromCache();
+        await reconcilePendingMessages();
+        state.bootstrapComplete = true;
+        refreshConnectionUi();
+        if (navigator.onLine) {
+          await flushPendingQueue();
+        }
+      } catch (error) {
+        if (retry) {
+          resetClientState();
+          await bootstrap(false);
+          return;
+        }
+        const message = error instanceof Error ? error.message : "初始化失败";
+        connectionChip.className = "chip offline";
+        connectionChip.textContent = `连接失败: ${message}`;
+        showToast(message);
       }
     }
 
@@ -1406,7 +2483,7 @@
 
     newConversationBtn.addEventListener("click", () => {
       resetConversation(true);
-      showToast("已切换到新对话，下一条消息会创建新的 conversation_id。");
+      showToast("已切换到新对话，下一条消息会创建新的本地会话。");
     });
 
     document.querySelectorAll("[data-route-mode]").forEach((button) => {
@@ -1416,7 +2493,17 @@
     });
 
     window.addEventListener("resize", applyResponsiveLayout);
+    window.addEventListener("online", async () => {
+      state.lastError = null;
+      refreshConnectionUi();
+      await flushPendingQueue();
+    });
+    window.addEventListener("offline", () => {
+      refreshConnectionUi();
+    });
+
     applyResponsiveLayout();
+    refreshConnectionUi();
     bootstrap();
   </script>
 </body>

@@ -1,5 +1,6 @@
 ﻿import json
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.user import User
-from app.schemas.message import MessageCreate, MessageRole, RouteMode
+from app.schemas.message import MessageCategory, MessageCreate, MessageRole, RouteMode
 from app.services.conversation_service import ConversationService
 
 
@@ -18,7 +19,9 @@ class MessageStreamState:
     conversation: Conversation
     user_message: Message
     route_mode: RouteMode
+    message_category: MessageCategory
     reply_text: str
+    assistant_message: Message | None = None
 
 
 class MessageService:
@@ -31,12 +34,18 @@ class MessageService:
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+        existing_user_message = self._get_existing_user_message(payload.client_message_id)
+        if existing_user_message:
+            return self._build_existing_stream_state(existing_user_message)
+
         conversation = self._resolve_conversation(payload)
         user_message = Message(
+            client_message_id=payload.client_message_id,
             conversation_id=conversation.id,
             role=MessageRole.USER.value,
             content=payload.content.strip(),
             route_mode=payload.route_mode.value,
+            message_category=payload.message_category.value,
         )
         self.db.add(user_message)
         conversation.updated_at = datetime.utcnow()
@@ -53,6 +62,7 @@ class MessageService:
             conversation=conversation,
             user_message=user_message,
             route_mode=payload.route_mode,
+            message_category=payload.message_category,
             reply_text=reply_text,
         )
 
@@ -64,11 +74,16 @@ class MessageService:
         return [normalized[index : index + chunk_size] for index in range(0, len(normalized), chunk_size)]
 
     def save_assistant_message(self, state: MessageStreamState) -> Message:
+        if state.assistant_message:
+            return state.assistant_message
+
         assistant_message = Message(
+            client_message_id=uuid.uuid4(),
             conversation_id=state.conversation.id,
             role=MessageRole.ASSISTANT.value,
             content=state.reply_text,
             route_mode=state.route_mode.value,
+            message_category=state.message_category.value,
         )
         state.conversation.updated_at = datetime.utcnow()
         state.conversation.summary = self._build_summary(state.reply_text)
@@ -88,7 +103,9 @@ class MessageService:
                 {
                     "conversation_id": str(state.conversation.id),
                     "route_mode": state.route_mode.value,
+                    "message_category": state.message_category.value,
                     "title": state.conversation.title,
+                    "client_message_id": str(state.user_message.client_message_id),
                     "user_message": self._serialize_message(state.user_message),
                 },
             )
@@ -115,6 +132,64 @@ class MessageService:
             payload.user_id,
             title=self._build_title(payload.content),
         )
+
+    def _get_existing_user_message(self, client_message_id: uuid.UUID) -> Message | None:
+        return (
+            self.db.query(Message)
+            .filter(
+                Message.client_message_id == client_message_id,
+                Message.role == MessageRole.USER.value,
+            )
+            .first()
+        )
+
+    def _build_existing_stream_state(self, user_message: Message) -> MessageStreamState:
+        conversation = user_message.conversation
+        history = self.conversations.list_messages(conversation.id, conversation.user_id)
+        assistant_message = self._find_assistant_for_user_message(user_message, history)
+        route_mode = RouteMode(user_message.route_mode or RouteMode.AUTO.value)
+        message_category = MessageCategory(user_message.message_category)
+
+        if not assistant_message:
+            history_before: list[Message] = []
+            for message in history:
+                if message.id == user_message.id:
+                    break
+                history_before.append(message)
+            reply_text = self._build_reply(user_message.content, route_mode, history_before)
+            state = MessageStreamState(
+                conversation=conversation,
+                user_message=user_message,
+                route_mode=route_mode,
+                message_category=message_category,
+                reply_text=reply_text,
+            )
+            state.assistant_message = self.save_assistant_message(state)
+            state.reply_text = state.assistant_message.content
+            return state
+
+        return MessageStreamState(
+            conversation=conversation,
+            user_message=user_message,
+            route_mode=route_mode,
+            message_category=message_category,
+            reply_text=assistant_message.content,
+            assistant_message=assistant_message,
+        )
+
+    def _find_assistant_for_user_message(self, user_message: Message, history: list[Message]) -> Message | None:
+        seen_user = False
+        for message in history:
+            if message.id == user_message.id:
+                seen_user = True
+                continue
+            if not seen_user:
+                continue
+            if message.role == MessageRole.USER.value:
+                return None
+            if message.role == MessageRole.ASSISTANT.value:
+                return message
+        return None
 
     def _build_reply(self, content: str, route_mode: RouteMode, history: list[Message]) -> str:
         history_prefix = "这是这段对话的第一轮，" if not history else f"我接着前面 {len(history)} 条上下文继续，"
@@ -148,10 +223,12 @@ class MessageService:
     def _serialize_message(self, message: Message) -> dict[str, str]:
         return {
             "id": str(message.id),
+            "client_message_id": str(message.client_message_id),
             "conversation_id": str(message.conversation_id),
             "role": message.role,
             "content": message.content,
             "route_mode": message.route_mode,
+            "message_category": message.message_category,
             "created_at": message.created_at.isoformat(),
         }
 
