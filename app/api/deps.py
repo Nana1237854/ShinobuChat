@@ -3,10 +3,9 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.auth_service import AuthService
-from app.services.conversation_service import ConversationService
+from app.services.chat_service import ChatService
 from app.services.device_registry_service import DeviceRegistryService
 from app.services.memory_service import MemoryService
-from app.services.message_service import MessageService
 from app.services.sync_service import SyncService
 
 
@@ -18,12 +17,8 @@ def get_device_registry_service(db: Session = Depends(get_db)) -> DeviceRegistry
     return DeviceRegistryService(db)
 
 
-def get_conversation_service(db: Session = Depends(get_db)) -> ConversationService:
-    return ConversationService(db)
-
-
-def get_message_service(db: Session = Depends(get_db)) -> MessageService:
-    return MessageService(db)
+def get_chat_service(db: Session = Depends(get_db)) -> ChatService:
+    return ChatService(db)
 
 
 def get_memory_service(db: Session = Depends(get_db)) -> MemoryService:

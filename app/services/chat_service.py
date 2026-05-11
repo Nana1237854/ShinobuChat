@@ -1,7 +1,8 @@
-﻿import json
+import json
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -10,7 +11,6 @@ from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.user import User
 from app.schemas.message import MessageCreate, MessageRole, RouteMode
-from app.services.conversation_service import ConversationService
 from app.services.realtime_sync_service import realtime_sync_service
 from app.services.sync_service import SyncService
 
@@ -23,84 +23,45 @@ class MessageStreamState:
     reply_text: str
 
 
-class MessageService:
+class ChatService:
     def __init__(self, db: Session):
         self.db = db
-        self.conversations = ConversationService(db)
 
-    def prepare_stream(self, payload: MessageCreate) -> MessageStreamState:
-        user = self.db.query(User).filter(User.id == payload.user_id).first()
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-        conversation = self._resolve_conversation(payload)
-        user_message = Message(
-            conversation_id=conversation.id,
-            role=MessageRole.USER.value,
-            content=payload.content.strip(),
-            route_mode=payload.route_mode.value,
+    def create_conversation(
+        self,
+        user_id: UUID,
+        title: str | None = None,
+        summary: str | None = None,
+    ) -> Conversation:
+        conversation = Conversation(
+            user_id=user_id,
+            title=title or "New conversation",
+            summary=summary,
         )
-        self.db.add(user_message)
-        conversation.updated_at = datetime.utcnow()
-        if conversation.title == "New conversation":
-            conversation.title = self._build_title(payload.content)
         self.db.add(conversation)
         self.db.commit()
         self.db.refresh(conversation)
-        self.db.refresh(user_message)
-        SyncService(self.db).record_server_change(
-            user.id,
-            "messages",
-            user_message.id,
-            "upsert",
-            self._serialize_message(user_message),
-            user_message.created_at,
-        )
-        realtime_sync_service.publish_message(user.id, user_message)
+        return conversation
 
-        history = self.conversations.list_messages(conversation.id, payload.user_id)
-        reply_text = self._build_reply(payload.content.strip(), payload.route_mode, history[:-1])
-        return MessageStreamState(
-            conversation=conversation,
-            user_message=user_message,
-            route_mode=payload.route_mode,
-            reply_text=reply_text,
+    def list_conversations(self, user_id: UUID) -> list[Conversation]:
+        return (
+            self.db.query(Conversation)
+            .filter(Conversation.user_id == user_id)
+            .order_by(Conversation.updated_at.desc())
+            .all()
         )
 
-    def stream_chunks(self, text: str) -> list[str]:
-        normalized = text.strip()
-        if len(normalized) <= 24:
-            return [normalized]
-        chunk_size = 18
-        return [normalized[index : index + chunk_size] for index in range(0, len(normalized), chunk_size)]
-
-    def save_assistant_message(self, state: MessageStreamState) -> Message:
-        assistant_message = Message(
-            conversation_id=state.conversation.id,
-            role=MessageRole.ASSISTANT.value,
-            content=state.reply_text,
-            route_mode=state.route_mode.value,
+    def get_messages(self, conversation_id: UUID, user_id: UUID) -> list[Message]:
+        self._get_conversation_for_user(conversation_id, user_id)
+        return (
+            self.db.query(Message)
+            .filter(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.asc())
+            .all()
         )
-        state.conversation.updated_at = datetime.utcnow()
-        state.conversation.summary = self._build_summary(state.reply_text)
-        self.db.add(assistant_message)
-        self.db.add(state.conversation)
-        self.db.commit()
-        self.db.refresh(state.conversation)
-        self.db.refresh(assistant_message)
-        SyncService(self.db).record_server_change(
-            state.conversation.user_id,
-            "messages",
-            assistant_message.id,
-            "upsert",
-            self._serialize_message(assistant_message),
-            assistant_message.created_at,
-        )
-        realtime_sync_service.publish_message(state.conversation.user_id, assistant_message)
-        return assistant_message
 
-    def create_streaming_response(self, payload: MessageCreate):
-        state = self.prepare_stream(payload)
+    def stream_reply(self, payload: MessageCreate):
+        state = self._prepare_stream(payload)
 
         def event_stream():
             yield self._format_event(
@@ -113,11 +74,11 @@ class MessageService:
                 },
             )
 
-            for chunk in self.stream_chunks(state.reply_text):
+            for chunk in self._stream_chunks(state.reply_text):
                 yield self._format_event("chunk", {"delta": chunk})
                 time.sleep(0.04)
 
-            assistant_message = self.save_assistant_message(state)
+            assistant_message = self._save_assistant_message(state)
             yield self._format_event(
                 "done",
                 {
@@ -128,13 +89,93 @@ class MessageService:
 
         return event_stream()
 
+    def _prepare_stream(self, payload: MessageCreate) -> MessageStreamState:
+        user = self.db.query(User).filter(User.id == payload.user_id).first()
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        conversation = self._resolve_conversation(payload)
+        user_message = Message(
+            conversation_id=conversation.id,
+            role=MessageRole.USER.value,
+            content=payload.content.strip(),
+            route_mode=payload.route_mode.value,
+        )
+        self.db.add(user_message)
+        self._touch_conversation(conversation)
+        if conversation.title == "New conversation":
+            conversation.title = self._build_title(payload.content)
+        self.db.add(conversation)
+        self.db.commit()
+        self.db.refresh(conversation)
+        self.db.refresh(user_message)
+        self._record_message_change(user.id, user_message)
+
+        history = self.get_messages(conversation.id, payload.user_id)
+        reply_text = self._build_reply(payload.content.strip(), payload.route_mode, history[:-1])
+        return MessageStreamState(
+            conversation=conversation,
+            user_message=user_message,
+            route_mode=payload.route_mode,
+            reply_text=reply_text,
+        )
+
     def _resolve_conversation(self, payload: MessageCreate) -> Conversation:
         if payload.conversation_id:
-            return self.conversations.get_for_user(payload.conversation_id, payload.user_id)
-        return self.conversations.create_for_user(
+            return self._get_conversation_for_user(payload.conversation_id, payload.user_id)
+        return self.create_conversation(
             payload.user_id,
             title=self._build_title(payload.content),
         )
+
+    def _get_conversation_for_user(self, conversation_id: UUID, user_id: UUID) -> Conversation:
+        conversation = (
+            self.db.query(Conversation)
+            .filter(Conversation.id == conversation_id, Conversation.user_id == user_id)
+            .first()
+        )
+        if not conversation:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        return conversation
+
+    def _stream_chunks(self, text: str) -> list[str]:
+        normalized = text.strip()
+        if len(normalized) <= 24:
+            return [normalized]
+        chunk_size = 18
+        return [normalized[index : index + chunk_size] for index in range(0, len(normalized), chunk_size)]
+
+    def _save_assistant_message(self, state: MessageStreamState) -> Message:
+        assistant_message = Message(
+            conversation_id=state.conversation.id,
+            role=MessageRole.ASSISTANT.value,
+            content=state.reply_text,
+            route_mode=state.route_mode.value,
+        )
+        self._touch_conversation(state.conversation, summary=self._build_summary(state.reply_text))
+        self.db.add(assistant_message)
+        self.db.add(state.conversation)
+        self.db.commit()
+        self.db.refresh(state.conversation)
+        self.db.refresh(assistant_message)
+        self._record_message_change(state.conversation.user_id, assistant_message)
+        return assistant_message
+
+    def _touch_conversation(self, conversation: Conversation, *, summary: str | None = None) -> None:
+        conversation.updated_at = datetime.utcnow()
+        if summary is not None:
+            conversation.summary = summary
+
+    def _record_message_change(self, user_id: UUID, message: Message) -> None:
+        SyncService(self.db).record_server_change(
+            user_id,
+            "messages",
+            message.id,
+            "upsert",
+            self._serialize_message(message),
+            message.created_at,
+        )
+        realtime_sync_service.publish_message(user_id, message)
 
     def _build_reply(self, content: str, route_mode: RouteMode, history: list[Message]) -> str:
         history_prefix = "这是这段对话的第一轮，" if not history else f"我接着前面 {len(history)} 条上下文继续，"

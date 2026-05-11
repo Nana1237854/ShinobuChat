@@ -1,9 +1,9 @@
 ﻿from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import get_message_service
+from app.api.deps import get_chat_service
 from app.schemas.message import MessageCreate
-from app.services.message_service import MessageService
+from app.services.chat_service import ChatService
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 
@@ -11,10 +11,10 @@ router = APIRouter(prefix="/messages", tags=["messages"])
 @router.post("", response_class=StreamingResponse)
 def create_message(
     payload: MessageCreate,
-    message_service: MessageService = Depends(get_message_service),
+    chat_service: ChatService = Depends(get_chat_service),
 ) -> StreamingResponse:
     return StreamingResponse(
-        message_service.create_streaming_response(payload),
+        chat_service.stream_reply(payload),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
