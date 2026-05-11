@@ -1,9 +1,11 @@
 ﻿from uuid import UUID
+from datetime import datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.security import get_password_hash, verify_password
+from app.models.device import Device
 from app.models.user import User
 from app.schemas.user import UserCreate
 
@@ -38,3 +40,23 @@ class AuthService:
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         return user
+
+    def register_device(self, user_id: UUID, device_code: str, device_name: str, device_type: str) -> Device:
+        device = Device(
+            user_id=user_id,
+            device_code=device_code,
+            device_name=device_name,
+            device_type=device_type,
+            last_seen_at=datetime.utcnow(),
+        )
+        self.db.add(device)
+        self.db.commit()
+        self.db.refresh(device)
+        return device
+
+    def _touch_device(self, device_code: str) -> None:
+        device = self.db.query(Device).filter(Device.device_code == device_code).first()
+        if device:
+            device.last_seen_at = datetime.utcnow()
+            self.db.add(device)
+            self.db.commit()

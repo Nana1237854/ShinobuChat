@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.deps import get_auth_service, get_device_registry_service
+from app.api.deps import get_auth_service
 from app.core.config import settings
 from app.core.security import create_access_token
 from app.schemas.auth import (
@@ -14,7 +14,6 @@ from app.schemas.auth import (
     DeviceTokenResponse,
 )
 from app.services.auth_service import AuthService
-from app.services.device_registry_service import DeviceRegistryService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -53,7 +52,7 @@ def authorize_device(
 @router.post("/device/token", response_model=DeviceTokenResponse)
 def device_token(
     payload: DeviceTokenRequest,
-    registry_service: DeviceRegistryService = Depends(get_device_registry_service),
+    auth_service: AuthService = Depends(get_auth_service),
 ) -> DeviceTokenResponse:
     auth_record = PENDING_DEVICE_AUTH.get(payload.device_code)
     if not auth_record:
@@ -66,7 +65,7 @@ def device_token(
     if not auth_record["approved"]:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="authorization_pending")
 
-    registry_service.register_device(
+    auth_service.register_device(
         user_id=UUID(auth_record["user_id"]),
         device_code=payload.device_code,
         device_name=auth_record["device_name"],
