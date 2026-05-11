@@ -28,6 +28,10 @@ describe('asset manifest helpers', () => {
         entry: 'seal.model3.json',
         thumbnail: 'thumb.png',
         defaultScale: 0.24,
+        emotionMapping: {
+          happy: { expression: 'sparkle_eyes', motion: 'idle' },
+          neutral: { motion: 'idle' },
+        },
       }),
       'utf8',
     );
@@ -54,6 +58,10 @@ describe('asset manifest helpers', () => {
           entry: '/assets/live2d/seal/seal.model3.json',
           thumbnail: '/assets/live2d/seal/thumb.png',
           defaultScale: 0.24,
+          emotionMapping: {
+            happy: { expression: 'sparkle_eyes', motion: 'idle' },
+            neutral: { motion: 'idle' },
+          },
         },
       ],
     });

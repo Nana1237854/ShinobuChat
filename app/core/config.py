@@ -30,7 +30,12 @@ class Settings(BaseSettings):
     memory_pgvector_enabled: bool = False
 
     live2d_assets_dir: Path = (
-        Path(__file__).resolve().parents[2] / "frontend" / "shinobu-chat" / "dist" / "assets" / "live2d"
+        Path(__file__).resolve().parents[2]
+        / "frontend"
+        / "shinobu-chat"
+        / "dist"
+        / "assets"
+        / "live2d"
     )
 
     decision_llm_api_key: str = ""

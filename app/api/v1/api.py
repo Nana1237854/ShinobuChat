@@ -1,6 +1,16 @@
-﻿from fastapi import APIRouter
+from fastapi import APIRouter
 
-from app.api.v1.routes import auth, characters, conversations, memories, messages, sync, todos, users
+from app.api.v1.routes import (
+    auth,
+    characters,
+    conversations,
+    live2d,
+    memories,
+    messages,
+    sync,
+    todos,
+    users,
+)
 
 api_router = APIRouter()
 api_router.include_router(users.router)
@@ -11,3 +21,4 @@ api_router.include_router(memories.router)
 api_router.include_router(todos.router)
 api_router.include_router(sync.router)
 api_router.include_router(characters.router)
+api_router.include_router(live2d.router)

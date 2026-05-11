@@ -12,6 +12,10 @@ const live2dManifestSchema = z.object({
     defaultScale: z.number().optional(),
     defaultX: z.number().optional(),
     defaultY: z.number().optional(),
+    emotionMapping: z.record(z.object({
+      expression: z.string().min(1).optional(),
+      motion: z.string().min(1).optional(),
+    })).optional(),
   })),
 });
 

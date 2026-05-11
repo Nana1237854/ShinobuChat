@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.api import api_router
+from app.api.v1.routes import live2d as live2d_routes
 from app.core.config import settings
 from app.db.init_db import init_db
 from app.services.live2d_service import Live2DAssetService
@@ -26,6 +27,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(api_router, prefix=settings.api_v1_prefix)
+    app.include_router(live2d_routes.router, prefix="/api")
 
     @app.on_event("startup")
     async def startup_event() -> None:
