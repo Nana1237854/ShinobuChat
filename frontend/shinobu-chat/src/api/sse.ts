@@ -27,13 +27,33 @@ export function parseRawSseEvent(rawEvent: string): RawSseEvent | null {
 
 export function normalizeStreamEvent(raw: RawSseEvent): StreamEvent | null {
   if (raw.eventName === 'conversation') {
-    return { type: 'conversation', payload: raw.payload as Extract<StreamEvent, { type: 'conversation' }>['payload'] };
+    const payload = raw.payload as { conversation_id: string; title: string; user_message: Extract<StreamEvent, { type: 'conversation' }>['userMessage'] };
+    return {
+      type: 'conversation',
+      conversationId: payload.conversation_id,
+      title: payload.title,
+      userMessage: payload.user_message,
+    };
   }
   if (raw.eventName === 'chunk') {
-    return { type: 'chunk', payload: raw.payload as Extract<StreamEvent, { type: 'chunk' }>['payload'] };
+    const payload = raw.payload as { delta: string };
+    return { type: 'chunk', delta: payload.delta };
+  }
+  if (raw.eventName === 'emotion') {
+    const payload = raw.payload as { emotion: string };
+    return { type: 'emotion', emotion: payload.emotion };
+  }
+  if (raw.eventName === 'progress') {
+    const payload = raw.payload as { skill_name: string; message: string; percent: number };
+    return { type: 'progress', skillName: payload.skill_name, message: payload.message, percent: payload.percent };
+  }
+  if (raw.eventName === 'error') {
+    const payload = raw.payload as { code: string; hint: string };
+    return { type: 'error', code: payload.code, hint: payload.hint };
   }
   if (raw.eventName === 'done') {
-    return { type: 'done', payload: raw.payload as Extract<StreamEvent, { type: 'done' }>['payload'] };
+    const payload = raw.payload as { assistant_message: Extract<StreamEvent, { type: 'done' }>['assistantMessage'] };
+    return { type: 'done', assistantMessage: payload.assistant_message };
   }
   return null;
 }

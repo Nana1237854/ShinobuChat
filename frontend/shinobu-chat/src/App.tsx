@@ -242,20 +242,20 @@ export default function App() {
         routeMode,
         onEvent: event => {
           if (event.type === 'conversation') {
-            setConversationId(event.payload.conversation_id);
-            localStorage.setItem('shinobu-conversation-id', event.payload.conversation_id);
+            setConversationId(event.conversationId);
+            localStorage.setItem('shinobu-conversation-id', event.conversationId);
             setMessages(current => {
-              const exists = current.some(item => item.id === event.payload.user_message.id);
-              return exists ? current : [...current, toChatMessage(event.payload.user_message)];
+              const exists = current.some(item => item.id === event.userMessage.id);
+              return exists ? current : [...current, toChatMessage(event.userMessage)];
             });
-            updateAvatarEmotion(event.payload.user_message);
+            updateAvatarEmotion(event.userMessage);
             refreshConversations();
           }
           if (event.type === 'chunk') {
             setMessages(current => {
               const pending = current.find(item => item.id === pendingId);
               if (pending) {
-                return current.map(item => item.id === pendingId ? { ...item, content: item.content + event.payload.delta } : item);
+                return current.map(item => item.id === pendingId ? { ...item, content: item.content + event.delta } : item);
               }
               return [
                 ...current,
@@ -263,7 +263,7 @@ export default function App() {
                   id: pendingId,
                   conversation_id: conversationId || 'pending',
                   role: 'assistant',
-                  content: event.payload.delta,
+                  content: event.delta,
                   route_mode: routeMode,
                   created_at: new Date().toISOString(),
                   status: 'streaming',
@@ -272,12 +272,22 @@ export default function App() {
               ];
             });
           }
+          if (event.type === 'emotion') {
+            setActiveEmotion(event.emotion);
+          }
+          if (event.type === 'progress') {
+            setStatus(`${event.skillName}: ${event.message} (${Math.round(event.percent * 100)}%)`);
+          }
+          if (event.type === 'error') {
+            setError(event.hint);
+            setStatus('Action failed');
+          }
           if (event.type === 'done') {
             setMessages(current => [
               ...current.filter(item => item.id !== pendingId),
-              toChatMessage(event.payload.assistant_message),
+              toChatMessage(event.assistantMessage),
             ]);
-            updateAvatarEmotion(event.payload.assistant_message);
+            updateAvatarEmotion(event.assistantMessage);
             refreshConversations();
           }
         },
