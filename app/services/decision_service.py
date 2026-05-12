@@ -1,0 +1,72 @@
+import json
+
+from app.core.config import settings
+from app.core.context_manager import ContextManager
+from app.schemas.decision import DecisionFrame, RouteDecision
+from app.schemas.message import RouteMode
+from app.skills.registry import SkillRegistry
+
+
+class DecisionService:
+    async def decide(
+        self,
+        user_message: str,
+        context: ContextManager,
+        force_route: str | None = None,
+    ) -> DecisionFrame:
+        if force_route == RouteMode.CHAT.value:
+            return DecisionFrame(route=RouteDecision.CHAT, reasoning="Route forced by user.", confidence=1.0)
+        if force_route == RouteMode.AGENT.value and not SkillRegistry.list_skills():
+            return DecisionFrame(
+                route=RouteDecision.CHAT,
+                reasoning="Agent route requested, but no skills are available.",
+                confidence=0.5,
+            )
+
+        if not settings.effective_decision_api_key:
+            return self._fallback_decision(user_message, force_route)
+
+        try:
+            from openai import AsyncOpenAI
+        except ModuleNotFoundError:
+            return self._fallback_decision(user_message, force_route)
+
+        client = AsyncOpenAI(
+            api_key=settings.effective_decision_api_key,
+            base_url=settings.decision_llm_base_url or settings.llm_base_url,
+        )
+        messages = [
+            {"role": "system", "content": context.decision_system_prompt(SkillRegistry.describe_for_llm())},
+            *context.decision_slice(),
+            {"role": "user", "content": user_message},
+        ]
+        try:
+            response = await client.chat.completions.create(
+                model=settings.decision_llm_model,
+                messages=messages,
+                temperature=settings.decision_llm_temperature,
+                max_tokens=settings.decision_llm_max_tokens,
+                response_format={"type": "json_object"},
+            )
+            content = response.choices[0].message.content or "{}"
+            decision = DecisionFrame.model_validate(json.loads(content))
+        except Exception:
+            return self._fallback_decision(user_message, force_route)
+
+        if decision.confidence < 0.6 or not decision.skill_name:
+            return DecisionFrame(
+                route=RouteDecision.CHAT,
+                skill_name=None,
+                skill_params=None,
+                reasoning=decision.reasoning,
+                confidence=decision.confidence,
+            )
+        if not SkillRegistry.get(decision.skill_name):
+            return DecisionFrame(route=RouteDecision.CHAT, reasoning="Selected skill is unavailable.", confidence=0.5)
+        return decision
+
+    def _fallback_decision(self, user_message: str, force_route: str | None) -> DecisionFrame:
+        if force_route == RouteMode.AGENT.value and SkillRegistry.list_skills():
+            return DecisionFrame(route=RouteDecision.AGENT, reasoning="Agent route forced by user.", confidence=1.0)
+        del user_message
+        return DecisionFrame(route=RouteDecision.CHAT, reasoning="LLM unavailable; using chat fallback.", confidence=0.5)
