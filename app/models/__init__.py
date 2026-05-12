@@ -1,4 +1,5 @@
 ﻿from app.db.session import Base
+from app.models.agent_log import AgentLog  # noqa: F401
 from app.models.conversation import Conversation
 from app.models.device import Device
 from app.models.memory import Memory, MemoryPreference
@@ -18,4 +19,5 @@ __all__ = [
     "Todo",
     "SyncRecord",
     "SyncOperation",
+    "AgentLog",
 ]

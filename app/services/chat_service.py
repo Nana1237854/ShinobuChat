@@ -1,5 +1,5 @@
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session
 from app.core.db_utils import require_user
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.schemas.agent import AgentStatusEvent
 from app.schemas.message import MessageCreate, MessageRole, RouteMode
+from app.services.agent_orchestrator import AgentOrchestrator
+from app.services.conversation_compactor import ConversationCompactor, CompactResult
 from app.services.realtime_sync_service import realtime_sync_service, format_sse
 from app.services.sync_service import SyncService
 
@@ -20,12 +23,21 @@ class MessageStreamState:
     user_message: Message
     route_mode: RouteMode
     reply_text: str
+    tool_results: list = field(default_factory=list)
 
 
 class ChatService:
-    def __init__(self, db: Session, sync: SyncService):
+    def __init__(
+        self,
+        db: Session,
+        sync: SyncService,
+        agent: AgentOrchestrator,
+        compactor: ConversationCompactor,
+    ):
         self.db = db
         self.sync = sync
+        self.agent = agent
+        self.compactor = compactor
 
     def create_conversation(
         self,
@@ -52,19 +64,57 @@ class ChatService:
             .all()
         )
 
-    def get_messages(self, conversation_id: UUID, user_id: UUID) -> list[Message]:
-        self._get_conversation_for_user(conversation_id, user_id)
-        return (
+    def get_messages(self, conversation_id: UUID, user_id: UUID) -> CompactResult:
+        conversation = self._get_conversation_for_user(conversation_id, user_id)
+        messages = (
             self.db.query(Message)
             .filter(Message.conversation_id == conversation_id)
             .order_by(Message.created_at.asc())
             .all()
         )
+        return self.compactor.compact(messages, conversation.summary or "", conversation_id)
 
     def stream_reply(self, payload: MessageCreate):
         state = self._prepare_stream(payload)
+        compact_result = self.get_messages(state.conversation.id, payload.user_id)
 
         def event_stream():
+            route_mode = payload.route_mode
+
+            if compact_result.was_compacted:
+                yield format_sse(
+                    "conversation.compacted",
+                    {
+                        "conversation_id": str(state.conversation.id),
+                        "summary_preview": compact_result.summary[:200],
+                    },
+                )
+
+            if route_mode != RouteMode.CHAT:
+                yield format_sse(
+                    "agent.status",
+                    AgentStatusEvent(status="running", route_mode=route_mode.value).model_dump(),
+                )
+
+                result = self.agent.execute(
+                    user_message=state.user_message,
+                    history=compact_result.messages[:-1],
+                    user_id=payload.user_id,
+                    conversation_id=state.conversation.id,
+                    conversation_summary=compact_result.summary if compact_result.was_compacted else "",
+                )
+
+                for tool_result in result.tool_results:
+                    yield format_sse("agent.tool_result", tool_result.model_dump(mode="json"))
+
+                yield format_sse(
+                    "agent.status",
+                    AgentStatusEvent(status="done", route_mode=route_mode.value).model_dump(),
+                )
+
+                state.reply_text = result.reply
+                state.tool_results = result.tool_results
+
             yield format_sse(
                 "conversation",
                 {
@@ -110,8 +160,15 @@ class ChatService:
         self.db.refresh(user_message)
         self._record_message_change(payload.user_id, user_message)
 
-        history = self.get_messages(conversation.id, payload.user_id)
-        reply_text = self._build_reply(payload.content.strip(), payload.route_mode, history[:-1])
+        compact = self.get_messages(conversation.id, payload.user_id)
+        if payload.route_mode != RouteMode.CHAT:
+            reply_text = ""
+        else:
+            reply_text = self._build_chat_reply(
+                payload.content.strip(),
+                compact.messages[:-1],
+                compact.summary if compact.was_compacted else "",
+            )
         return MessageStreamState(
             conversation=conversation,
             user_message=user_message,
@@ -151,13 +208,23 @@ class ChatService:
             content=state.reply_text,
             route_mode=state.route_mode.value,
         )
-        self._touch_conversation(state.conversation, summary=self._build_summary(state.reply_text))
+        self._touch_conversation(state.conversation)
         self.db.add(assistant_message)
         self.db.add(state.conversation)
         self.db.commit()
         self.db.refresh(state.conversation)
         self.db.refresh(assistant_message)
         self._record_message_change(state.conversation.user_id, assistant_message)
+
+        self.compactor.accumulate(
+            conversation=state.conversation,
+            user_message=state.user_message,
+            assistant_message=assistant_message,
+            tool_results=state.tool_results,
+            route_mode=state.route_mode.value,
+        )
+        self.db.add(state.conversation)
+        self.db.commit()
         return assistant_message
 
     def _touch_conversation(self, conversation: Conversation, *, summary: str | None = None) -> None:
@@ -176,23 +243,24 @@ class ChatService:
         )
         realtime_sync_service.publish_message(user_id, message)
 
-    def _build_reply(self, content: str, route_mode: RouteMode, history: list[Message]) -> str:
+    def _build_chat_reply(
+        self,
+        content: str,
+        history: list[Message],
+        conversation_summary: str = "",
+    ) -> str:
         history_prefix = "这是这段对话的第一轮，" if not history else f"我接着前面 {len(history)} 条上下文继续，"
-        if route_mode is RouteMode.CHAT:
-            mode_prefix = "现在是纯聊天模式，我先陪你把想法说清楚。"
-        elif route_mode is RouteMode.AGENT:
-            mode_prefix = "现在按 Agent 模式处理，我先把它整理成可执行动作。"
-        else:
-            mode_prefix = "现在是自动决策模式，我会先接住消息，再判断是否需要升级成任务流。"
-
         focus = content.replace("\r", " ").replace("\n", " ").strip()
         if len(focus) > 80:
             focus = f"{focus[:77]}..."
-
+        summary_hint = ""
+        if conversation_summary:
+            summary_hint = f"回顾之前：{conversation_summary[-200:]}。"
         return (
-            f"{mode_prefix}{history_prefix}"
-            f"你刚刚提到“{focus}”。"
-            " 我建议下一步继续补充目标、约束和时间点，这样我们就能稳定地走成单轮确认或多轮推进。"
+            f"现在是纯聊天模式，我先陪你把想法说清楚。{summary_hint}"
+            f"{history_prefix}"
+            f"你刚刚提到「{focus}」。"
+            "我建议下一步继续补充目标、约束和时间点，这样我们就能稳定地走成单轮确认或多轮推进。"
         )
 
     def _build_title(self, content: str) -> str:
@@ -214,4 +282,3 @@ class ChatService:
             "route_mode": message.route_mode,
             "created_at": message.created_at.isoformat(),
         }
-
