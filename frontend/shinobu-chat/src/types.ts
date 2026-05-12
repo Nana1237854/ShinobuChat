@@ -36,29 +36,20 @@ export type ApiMessage = {
   created_at: string;
 };
 
+export type MessageOut = ApiMessage;
+
 export type ChatMessage = ApiMessage & {
   status?: 'sending' | 'streaming' | 'sent' | 'failed';
   local?: boolean;
 };
 
 export type StreamEvent =
-  | {
-      type: 'conversation';
-      payload: {
-        conversation_id: string;
-        route_mode: RouteMode;
-        title: string;
-        user_message: ApiMessage;
-      };
-    }
-  | { type: 'chunk'; payload: { delta: string } }
-  | {
-      type: 'done';
-      payload: {
-        conversation_id: string;
-        assistant_message: ApiMessage;
-      };
-    };
+  | { type: 'conversation'; conversationId: string; title: string; userMessage: MessageOut }
+  | { type: 'chunk'; delta: string }
+  | { type: 'done'; assistantMessage: MessageOut }
+  | { type: 'emotion'; emotion: string }
+  | { type: 'progress'; skillName: string; message: string; percent: number }
+  | { type: 'error'; code: string; hint: string };
 
 export type Live2DModelItem = {
   id: string;
