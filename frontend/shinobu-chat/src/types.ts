@@ -10,6 +10,26 @@ export type Live2DEmotionMappingItem = {
 
 export type Live2DEmotionMapping = Record<string, Live2DEmotionMappingItem>;
 
+export type ToneSettings = {
+  warmth: number;
+  sharpness: number;
+  formality: number;
+};
+
+export type CharacterCard = {
+  name: string;
+  persona: string;
+  tone: ToneSettings;
+  example_dialogue: string[];
+  visual: Record<string, string>;
+  system_prompt_extra: string;
+};
+
+export type CharacterCardOverride = {
+  tone?: ToneSettings;
+  system_prompt_extra?: string;
+};
+
 export type AuthSession = {
   accessToken: string;
   userId: string;
