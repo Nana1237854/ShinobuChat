@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Gamepad2, Send } from 'lucide-react';
+import { Gamepad2, Plus, Send } from 'lucide-react';
 import type { RouteMode } from '../types';
 
 type ComposerProps = {
@@ -81,10 +81,13 @@ export function Composer({
           submit();
         }}
       >
+        <button className="attach-button" type="button" title="添加内容" disabled={disabled}>
+          <Plus size={18} />
+        </button>
         <textarea
           value={draft}
           disabled={disabled}
-          placeholder="和 Shinobu 聊天，或给她一个任务..."
+          placeholder="输入消息..."
           onChange={event => setDraft(event.target.value)}
           onKeyDown={event => {
             if (event.nativeEvent.isComposing) return;
@@ -98,6 +101,7 @@ export function Composer({
           <Send size={18} />
         </button>
       </form>
+      <p className="composer-footnote">由 Shinobu AI 驱动</p>
     </footer>
   );
 }
