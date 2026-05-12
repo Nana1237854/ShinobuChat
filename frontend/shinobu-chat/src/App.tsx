@@ -19,6 +19,7 @@ import { AuthPanel } from './auth/AuthPanel';
 import { ConversationList } from './chat/ConversationList';
 import { MessageList } from './chat/MessageList';
 import { Composer } from './chat/Composer';
+import { CharacterEditor } from './chat/CharacterEditor';
 import { Live2DStage } from './live2d/Live2DStage';
 import { PetTaskbar } from './desktop-pet/PetTaskbar';
 import { PetSettingsPanel } from './desktop-pet/PetSettingsPanel';
@@ -444,18 +445,21 @@ export default function App() {
           onScreenshot={handleScreenshot}
         />
         {settingsOpen ? (
-          <PetSettingsPanel
-            settings={petSettings}
-            models={models}
-            backgrounds={backgrounds}
-            onChange={setPetSettings}
-            onRefreshModels={() => {
-              reloadAssets().catch(nextError => {
-                setError(nextError instanceof Error ? nextError.message : 'Failed to refresh assets');
-              });
-            }}
-            onClose={() => setSettingsOpen(false)}
-          />
+          <>
+            <PetSettingsPanel
+              settings={petSettings}
+              models={models}
+              backgrounds={backgrounds}
+              onChange={setPetSettings}
+              onRefreshModels={() => {
+                reloadAssets().catch(nextError => {
+                  setError(nextError instanceof Error ? nextError.message : 'Failed to refresh assets');
+                });
+              }}
+              onClose={() => setSettingsOpen(false)}
+            />
+            <CharacterEditor userId={session.userId} />
+          </>
         ) : null}
         {petFeedback ? <div className="pet-feedback">{petFeedback}</div> : null}
         <MusicPlayer tracks={tracks} />

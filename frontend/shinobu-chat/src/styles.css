@@ -518,6 +518,7 @@ button:disabled {
 }
 
 .pet-settings-panel,
+.character-editor,
 .music-player {
   position: absolute;
   z-index: 8;
@@ -535,6 +536,59 @@ button:disabled {
   display: grid;
   gap: 14px;
   padding: 16px;
+}
+
+.character-editor {
+  right: 18px;
+  top: 348px;
+  width: min(320px, calc(100% - 36px));
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.character-editor header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.character-editor h2,
+.character-editor p {
+  margin: 0;
+}
+
+.character-editor header p,
+.character-editor-error {
+  color: #667085;
+  font-size: 0.82rem;
+}
+
+.character-editor label {
+  display: grid;
+  gap: 6px;
+  color: #536076;
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.character-editor input[type="range"],
+.character-editor textarea {
+  width: 100%;
+}
+
+.character-editor textarea {
+  resize: vertical;
+  min-height: 104px;
+  padding: 9px 10px;
+  border: 1px solid rgba(91, 111, 145, 0.22);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.84);
+  color: #1f2633;
+}
+
+.character-editor-error {
+  color: #b42318;
 }
 
 .pet-settings-panel header,

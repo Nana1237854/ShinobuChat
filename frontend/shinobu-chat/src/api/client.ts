@@ -1,4 +1,12 @@
-import type { ApiMessage, AuthSession, Conversation, RouteMode, StreamEvent } from '../types';
+import type {
+  ApiMessage,
+  AuthSession,
+  CharacterCard,
+  CharacterCardOverride,
+  Conversation,
+  RouteMode,
+  StreamEvent,
+} from '../types';
 import { decodeJwtSubject } from './auth';
 import { consumeSseStream } from './sse';
 
@@ -67,6 +75,25 @@ export async function listMessages(conversationId: string, userId: string): Prom
   const params = new URLSearchParams({ user_id: userId });
   const response = await fetch(`${API_BASE}/conversations/${encodeURIComponent(conversationId)}/messages?${params}`);
   return parseJsonResponse<ApiMessage[]>(response);
+}
+
+export async function fetchCharacterCard(userId: string): Promise<CharacterCard> {
+  const params = new URLSearchParams({ user_id: userId });
+  const response = await fetch(`${API_BASE}/characters/active?${params}`);
+  return parseJsonResponse<CharacterCard>(response);
+}
+
+export async function updateCharacterCard(
+  userId: string,
+  override: CharacterCardOverride,
+): Promise<CharacterCard> {
+  const params = new URLSearchParams({ user_id: userId });
+  const response = await fetch(`${API_BASE}/characters/active?${params}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(override),
+  });
+  return parseJsonResponse<CharacterCard>(response);
 }
 
 export async function sendMessageStream(payload: {
