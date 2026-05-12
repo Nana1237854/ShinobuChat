@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ShinobuChat iOS 外观验收参考</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #332923;
+      --muted: #786a60;
+      --paper: rgba(255, 251, 247, 0.9);
+      --line: rgba(68, 52, 39, 0.12);
+      --accent: #b74b25;
+      --accent-dark: #9b351a;
+      --sage: #dceee7;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        linear-gradient(135deg, #e9d0ba 0%, #f8eee6 48%, #c9d7dc 100%);
+    }
+
+    .page {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 30px 0 36px;
+    }
+
+    header {
+      margin-bottom: 22px;
+    }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: 28px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .showcase {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(260px, 1fr));
+      gap: 22px;
+      align-items: start;
+    }
+
+    .panel-title {
+      margin: 0 0 10px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #4d3c31;
+    }
+
+    .phone {
+      position: relative;
+      width: 100%;
+      max-width: 340px;
+      margin: 0 auto;
+      aspect-ratio: 390 / 844;
+      padding: 12px;
+      border-radius: 42px;
+      background: #181614;
+      box-shadow: 0 28px 70px rgba(54, 38, 25, 0.28);
+    }
+
+    .screen {
+      position: relative;
+      height: 100%;
+      overflow: hidden;
+      border-radius: 32px;
+      background:
+        linear-gradient(135deg, rgba(232, 207, 183, 0.95), rgba(251, 240, 231, 0.96) 50%, rgba(199, 215, 220, 0.94));
+    }
+
+    .island {
+      position: absolute;
+      top: 11px;
+      left: 50%;
+      z-index: 4;
+      width: 112px;
+      height: 34px;
+      transform: translateX(-50%);
+      border-radius: 999px;
+      background: #141210;
+    }
+
+    .nav {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      grid-template-columns: 64px 1fr 64px;
+      align-items: end;
+      height: 82px;
+      padding: 0 14px 12px;
+      font-weight: 700;
+    }
+
+    .nav button,
+    .send {
+      border: 0;
+      font: inherit;
+    }
+
+    .nav button {
+      padding: 0;
+      background: transparent;
+      color: var(--accent-dark);
+      font-size: 14px;
+      text-align: left;
+    }
+
+    .nav .right {
+      text-align: right;
+    }
+
+    .nav-title {
+      text-align: center;
+      font-size: 17px;
+    }
+
+    .login-wrap {
+      display: grid;
+      align-content: center;
+      height: calc(100% - 82px);
+      padding: 22px;
+    }
+
+    .login-card {
+      padding: 22px;
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.72);
+      box-shadow: 0 18px 44px rgba(67, 43, 27, 0.12);
+      backdrop-filter: blur(18px);
+    }
+
+    .brand {
+      margin: 0 0 18px;
+      font-size: 31px;
+      line-height: 1.05;
+      font-weight: 800;
+    }
+
+    .field {
+      height: 40px;
+      margin-top: 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #fff;
+      color: #6d625b;
+      font-size: 14px;
+    }
+
+    .primary {
+      display: grid;
+      place-items: center;
+      width: 100%;
+      height: 44px;
+      margin-top: 16px;
+      border: 0;
+      border-radius: 10px;
+      color: #fff7f1;
+      background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+      font-weight: 700;
+    }
+
+    .messages {
+      height: calc(100% - 222px);
+      padding: 12px 16px 18px;
+      overflow: hidden;
+    }
+
+    .bubble-row {
+      display: flex;
+      margin-bottom: 12px;
+    }
+
+    .bubble-row.user {
+      justify-content: flex-end;
+    }
+
+    .bubble {
+      max-width: 79%;
+      padding: 11px 15px;
+      border-radius: 19px;
+      font-size: 15px;
+      line-height: 1.42;
+      box-shadow: 0 9px 22px rgba(43, 30, 22, 0.1);
+    }
+
+    .assistant .bubble {
+      background: var(--paper);
+      color: var(--ink);
+    }
+
+    .user .bubble {
+      color: #fff7f0;
+      background: linear-gradient(135deg, #c25935, #a93d1f);
+    }
+
+    .composer {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      padding: 11px 14px 16px;
+      background: rgba(255, 255, 255, 0.42);
+      backdrop-filter: blur(22px);
+      border-top: 1px solid rgba(255, 255, 255, 0.56);
+    }
+
+    .push-status {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      height: 32px;
+      margin-bottom: 10px;
+      padding: 0 10px;
+      border-radius: 999px;
+      color: #235c4b;
+      background: rgba(220, 238, 231, 0.92);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .segments {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2px;
+      height: 34px;
+      margin-bottom: 10px;
+      padding: 2px;
+      border-radius: 9px;
+      background: rgba(118, 103, 92, 0.18);
+      font-size: 13px;
+      font-weight: 650;
+      text-align: center;
+    }
+
+    .segment {
+      display: grid;
+      place-items: center;
+      border-radius: 7px;
+      color: #625448;
+    }
+
+    .segment.active {
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 1px 4px rgba(54, 38, 25, 0.12);
+    }
+
+    .input-row {
+      display: grid;
+      grid-template-columns: 1fr 44px;
+      gap: 10px;
+      align-items: end;
+    }
+
+    .input {
+      min-height: 44px;
+      padding: 12px 14px;
+      border-radius: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.6);
+      background: rgba(255, 255, 255, 0.72);
+      color: #6d625b;
+      font-size: 14px;
+    }
+
+    .send {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      border-radius: 999px;
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+      font-size: 19px;
+    }
+
+    @media (max-width: 900px) {
+      .showcase {
+        grid-template-columns: 1fr;
+      }
+
+      .phone {
+        max-width: 360px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <h1>ShinobuChat iOS 初版外观验收参考</h1>
+      <p class="subtitle">用于 Windows 上预览首屏风格：登录、聊天气泡、SQLite 恢复态与 APNs 状态条。</p>
+    </header>
+
+    <section class="showcase" aria-label="iOS appearance reference">
+      <article>
+        <p class="panel-title">1. 登录 / Device Registry</p>
+        <div class="phone">
+          <div class="screen">
+            <div class="island"></div>
+            <div class="nav">
+              <span></span>
+              <span class="nav-title">Shinobu</span>
+              <span></span>
+            </div>
+            <div class="login-wrap">
+              <div class="login-card">
+                <p class="brand">ShinobuChat</p>
+                <div class="field">http://127.0.0.1:8000/api/v1</div>
+                <div class="field">demo@shinobu.chat</div>
+                <div class="field">••••••••••</div>
+                <button class="primary">登录并注册设备</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article>
+        <p class="panel-title">2. 聊天 / Web 原型气泡</p>
+        <div class="phone">
+          <div class="screen">
+            <div class="island"></div>
+            <div class="nav">
+              <button>清空</button>
+              <span class="nav-title">Shinobu</span>
+              <button class="right">退出</button>
+            </div>
+            <div class="messages">
+              <div class="bubble-row assistant">
+                <div class="bubble">准备好了。发送第一条消息时会自动创建 conversation_id。</div>
+              </div>
+              <div class="bubble-row user">
+                <div class="bubble">帮我整理今天要推进的事情。</div>
+              </div>
+              <div class="bubble-row assistant">
+                <div class="bubble">现在按 Agent 模式处理，我先把它整理成可执行动作。</div>
+              </div>
+            </div>
+            <div class="composer">
+              <div class="push-status">🔔 等待 APNs token</div>
+              <div class="segments">
+                <div class="segment active">自动</div>
+                <div class="segment">纯聊天</div>
+                <div class="segment">Agent</div>
+              </div>
+              <div class="input-row">
+                <div class="input">和 Shinobu 聊天，或者给她安排一个任务</div>
+                <button class="send">↗</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article>
+        <p class="panel-title">3. APNs 已上报 / 通知接收</p>
+        <div class="phone">
+          <div class="screen">
+            <div class="island"></div>
+            <div class="nav">
+              <button>清空</button>
+              <span class="nav-title">Shinobu</span>
+              <button class="right">退出</button>
+            </div>
+            <div class="messages">
+              <div class="bubble-row user">
+                <div class="bubble">继续刚才的任务。</div>
+              </div>
+              <div class="bubble-row assistant">
+                <div class="bubble">我接着前面上下文继续，先确认目标、约束和时间点。</div>
+              </div>
+              <div class="bubble-row assistant">
+                <div class="bubble">最近通知：Shinobu 已同步新的回复。</div>
+              </div>
+            </div>
+            <div class="composer">
+              <div class="push-status">🔔 APNs 已上报 · Shinobu 已同步新的回复</div>
+              <div class="segments">
+                <div class="segment">自动</div>
+                <div class="segment">纯聊天</div>
+                <div class="segment active">Agent</div>
+              </div>
+              <div class="input-row">
+                <div class="input">输入下一条消息</div>
+                <button class="send">↗</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

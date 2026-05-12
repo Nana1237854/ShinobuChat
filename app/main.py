@@ -1,6 +1,6 @@
-﻿from pathlib import Path
+from pathlib import Path
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -11,9 +11,7 @@ from app.core.config import settings
 from app.db.init_db import init_db
 from app.services.live2d_service import Live2DAssetService
 
-FRONTEND_DIST = (
-    Path(__file__).resolve().parent.parent / "frontend" / "shinobu-chat" / "dist"
-)
+FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "shinobu-chat" / "dist"
 live2d_assets = Live2DAssetService(FRONTEND_DIST)
 
 
@@ -45,12 +43,19 @@ def create_app() -> FastAPI:
     async def import_live2d(file: UploadFile = File(...)) -> JSONResponse:
         return JSONResponse(await live2d_assets.import_zip(file))
 
-    # Serve frontend static files as catch-all (after API routes)
-    app.mount(
-        "/",
-        StaticFiles(directory=str(FRONTEND_DIST), html=True),
-        name="frontend",
-    )
+    if not (FRONTEND_DIST / "index.html").exists():
+        @app.get("/", include_in_schema=False)
+        async def frontend_not_built() -> None:
+            raise HTTPException(
+                status_code=503,
+                detail="React frontend is not built. Run `npm run build` in frontend/shinobu-chat.",
+            )
+    else:
+        app.mount(
+            "/",
+            StaticFiles(directory=FRONTEND_DIST, html=True),
+            name="shinobu-chat-frontend",
+        )
 
     return app
 
