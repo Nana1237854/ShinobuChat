@@ -9,6 +9,7 @@ from app.services.chat_service import ChatService
 from app.services.conversation_compactor import ConversationCompactor
 from app.services.decision_service import DecisionService
 from app.services.memory_service import MemoryService
+from app.services.message_service import MessageService
 from app.services.roleplay_service import RoleplayService
 from app.services.skill_service import SkillService
 from app.services.sync_service import SyncService
@@ -51,6 +52,10 @@ def get_chat_service(
     compactor: ConversationCompactor = Depends(get_compactor),
 ) -> ChatService:
     return ChatService(db, SyncService(db), agent, compactor)
+
+
+def get_message_service(db: Session = Depends(get_db)) -> MessageService:
+    return MessageService(db)
 
 
 def get_sync_service(db: Session = Depends(get_db)) -> SyncService:
