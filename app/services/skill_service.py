@@ -4,13 +4,21 @@ from app.core.config import settings
 from app.events.bus import bus
 from app.events.types import EventType
 from app.schemas.decision import SkillCall
+from app.services.memory_service import MemoryService
+from app.services.todo_service import TodoService
 from app.skills.base import SkillError, SkillProgress
 from app.skills.registry import SkillRegistry
 
 
 class SkillService:
-    def __init__(self):
+    def __init__(
+        self,
+        memory_service: MemoryService | None = None,
+        todo_service: TodoService | None = None,
+    ):
         self._active_cancel: asyncio.Event | None = None
+        self.memory_service = memory_service
+        self.todo_service = todo_service
 
     async def execute(self, skill_call: SkillCall) -> None:
         skill = SkillRegistry.get(skill_call.skill_name)
@@ -25,6 +33,12 @@ class SkillService:
                 },
             )
             return
+
+        setattr(skill, "_memory_service", self.memory_service)
+        setattr(skill, "_todo_service", self.todo_service)
+        params = dict(skill_call.skill_params)
+        if "user_id" not in params and skill_call.message_id:
+            params["user_id"] = skill_call.message_id
 
         cancel_token = asyncio.Event()
         self._active_cancel = cancel_token
@@ -42,7 +56,7 @@ class SkillService:
         try:
             result = await asyncio.wait_for(
                 skill.execute(
-                    skill_call.skill_params,
+                    params,
                     on_progress,
                     float(settings.skill_timeout_seconds),
                     cancel_token,

@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     characters_dir: Path = Path(__file__).resolve().parents[2] / "characters"
     skill_timeout_seconds: int = 120
     decision_debounce_ms: int = 300
+    google_search_api_key: str = ""
+    google_search_cx: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="SC_")
 

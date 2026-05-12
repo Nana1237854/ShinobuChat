@@ -22,6 +22,7 @@ from app.services.realtime_sync_service import realtime_sync_service
 from app.services.roleplay_service import RoleplayService
 from app.services.skill_service import SkillService
 from app.services.sync_service import SyncService
+from app.services.todo_service import TodoService
 from app.skills.base import SkillError
 
 
@@ -63,13 +64,15 @@ class MessageService:
     async def sse_event_stream(self, state: MessageStreamState, payload: MessageCreate):
         char_svc = CharacterService()
         roleplay_svc = RoleplayService()
+        memory_svc = MemoryService(self.db, self.sync)
+        todo_svc = TodoService(self.db, self.sync)
         pipeline = ChatPipeline(
             user_id=str(payload.user_id),
             character_service=char_svc,
             decision_service=DecisionService(),
             roleplay_service=roleplay_svc,
-            skill_service=SkillService(),
-            memory_service=MemoryService(self.db, self.sync),
+            skill_service=SkillService(memory_svc, todo_svc),
+            memory_service=memory_svc,
         )
 
         subscriptions = [

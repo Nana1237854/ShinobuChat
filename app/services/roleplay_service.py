@@ -6,6 +6,20 @@ from app.schemas.character import ToneSettings
 from app.skills.base import SkillError
 
 
+ERROR_HINTS = {
+    "TIMEOUT": "比预期久了一些... 要不要再试一次？",
+    "PERMISSION_DENIED": "这个操作我没有权限呢。你能帮我检查一下设置吗？",
+    "NETWORK_ERROR": "网络好像不太稳定，稍后再试？",
+    "API_KEY_MISSING": "这个功能还没配置好，需要先设置 API Key 哦。",
+    "OCR_NOT_AVAILABLE": "OCR 组件没装上，暂时读不了屏幕内容。",
+    "SKILL_NOT_FOUND": "我还没学会这个技能呢。",
+    "PIPELINE_ERROR": "内部出了点小问题，再试一次？",
+    "INVALID_PARAMS": "参数看起来不太对，我们换个说法再试一次？",
+    "CANCELLED": "好的，这次操作已经取消。",
+    "UNKNOWN": "出了点小问题，再试一次？",
+}
+
+
 class RoleplayService:
     async def generate_reply(
         self,
@@ -72,10 +86,12 @@ class RoleplayService:
         tone: ToneSettings,
         context: ContextManager,
     ) -> dict[str, str]:
+        hint = ERROR_HINTS.get(error.code, error.user_facing_hint or ERROR_HINTS["UNKNOWN"])
         prompt = (
-            f"A skill failed with code {error.code}. Message: {error.message}. "
-            f"User-facing hint: {error.user_facing_hint}. Explain this naturally."
+            f"[System: A task failed with error '{error.code}'. "
+            f"Internal message: {error.message}. "
+            f"Tell the user naturally: {hint}. Output JSON with text and emotion='worried'.]"
         )
         if not settings.effective_roleplay_api_key:
-            return {"text": error.user_facing_hint, "emotion": "worried"}
+            return {"text": hint, "emotion": "worried"}
         return await self.generate_reply(prompt, context, tone)

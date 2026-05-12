@@ -105,6 +105,7 @@ class ChatPipeline:
         skill_call = SkillCall(
             skill_name=decision.skill_name or "",
             skill_params=decision.skill_params or {},
+            message_id=self.user_id,
             decision_frame=decision,
         )
         await self.skill_service.execute(skill_call)
