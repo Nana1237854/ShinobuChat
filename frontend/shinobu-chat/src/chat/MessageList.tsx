@@ -15,8 +15,8 @@ export function MessageList({ messages }: MessageListProps) {
     return (
       <div className="message-list">
         <div className="welcome-card">
-          <h2>准备好了</h2>
-          <p>向 Shinobu 发送消息，后端会通过 SSE 流式返回回复。</p>
+          <h2>今天想和忍聊什么？</h2>
+          <p>给 Shinobu 发消息，她会通过实时流式回复陪你继续。</p>
         </div>
       </div>
     );

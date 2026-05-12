@@ -191,6 +191,25 @@ export function Live2DStage({
     runtime.modelObject.alpha = settings.opacity;
   }, [settings.opacity, settings.scale, settings.x, settings.y]);
 
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+
+    const syncRuntimeSize = () => {
+      const runtime = runtimeRef.current;
+      if (!runtime?.modelObject) return;
+      const width = Math.max(container.clientWidth, 1);
+      const height = Math.max(container.clientHeight, 1);
+      runtime.app.renderer.resize(width, height);
+      runtime.modelObject.position?.set(width * settings.x / 100, height * settings.y / 100);
+    };
+
+    syncRuntimeSize();
+    const observer = new ResizeObserver(syncRuntimeSize);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [settings.x, settings.y, model?.entry]);
+
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = {

@@ -1,5 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bot, LogOut, Plus, RefreshCw } from 'lucide-react';
+import {
+  Bot,
+  ChevronLeft,
+  ChevronRight,
+  History,
+  LogOut,
+  MessageSquarePlus,
+  MoreHorizontal,
+  Music2,
+  PanelLeft,
+  RefreshCw,
+  Search,
+  Settings,
+  Sparkles,
+  UserRoundCog,
+} from 'lucide-react';
 import { AuthPanel } from './auth/AuthPanel';
 import { ConversationList } from './chat/ConversationList';
 import { MessageList } from './chat/MessageList';
@@ -73,6 +88,8 @@ export default function App() {
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
   const [petSettings, setPetSettings] = useState<PetSettings>(() => loadPetSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarPanel, setSidebarPanel] = useState<'history' | 'models' | 'scenes' | null>('history');
   const [activeTool, setActiveTool] = useState<AvatarTool | null>(null);
   const [activeEmotion, setActiveEmotion] = useState<string | null>(null);
   const [petFeedback, setPetFeedback] = useState<string | null>(null);
@@ -318,7 +335,89 @@ export default function App() {
   }
 
   return (
-    <main className="workspace" style={backgroundStyle}>
+    <main className={sidebarCollapsed ? 'workspace sidebar-is-collapsed' : 'workspace'} style={backgroundStyle}>
+      <aside className="app-sidebar" aria-label="ShinobuChat navigation">
+        <header className="sidebar-header">
+          <div className="sidebar-brand">
+            <span className="sidebar-logo"><Sparkles size={18} /></span>
+            <strong>ShinobuChat</strong>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+            onClick={() => setSidebarCollapsed(current => !current)}
+          >
+            {sidebarCollapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+          </button>
+        </header>
+
+        <nav className="sidebar-menu" aria-label="Primary">
+          <button type="button" className="sidebar-item is-active" onClick={startNewConversation}>
+            <MessageSquarePlus size={18} />
+            <span>新对话</span>
+          </button>
+          <button type="button" className="sidebar-item" onClick={() => setSidebarPanel('history')}>
+            <Search size={18} />
+            <span>搜索聊天</span>
+          </button>
+          <button type="button" className="sidebar-item" onClick={() => setSidebarPanel('history')}>
+            <History size={18} />
+            <span>会话历史</span>
+          </button>
+          <button type="button" className="sidebar-item" onClick={() => setSidebarPanel('models')}>
+            <UserRoundCog size={18} />
+            <span>角色与模型</span>
+          </button>
+          <button type="button" className="sidebar-item" onClick={() => setSidebarPanel('scenes')}>
+            <Music2 size={18} />
+            <span>场景音乐</span>
+          </button>
+          <button type="button" className="sidebar-item" onClick={() => setSettingsOpen(true)}>
+            <MoreHorizontal size={18} />
+            <span>更多</span>
+          </button>
+        </nav>
+
+        <div className="sidebar-panel">
+          {sidebarPanel === 'history' ? (
+            <ConversationList
+              conversations={conversations}
+              activeId={conversationId}
+              onSelect={setConversationId}
+            />
+          ) : null}
+          {sidebarPanel === 'models' ? (
+            <div className="sidebar-card">
+              <strong>角色与模型</strong>
+              <span>{selectedModel?.name || '正在加载 Live2D 模型'}</span>
+              <button type="button" className="sidebar-mini-action" onClick={() => setSettingsOpen(true)}>
+                打开角色设置
+              </button>
+            </div>
+          ) : null}
+          {sidebarPanel === 'scenes' ? (
+            <div className="sidebar-card">
+              <strong>场景音乐</strong>
+              <span>{selectedBackground?.name || '默认场景'} · {tracks.length} 首音乐</span>
+              <button type="button" className="sidebar-mini-action" onClick={() => setSettingsOpen(true)}>
+                调整舞台设置
+              </button>
+            </div>
+          ) : null}
+        </div>
+
+        <footer className="sidebar-footer">
+          <button type="button" className="sidebar-user" title={session.email}>
+            <span>{(session.displayName || session.email || 'S').slice(0, 1).toUpperCase()}</span>
+            <small>{session.displayName || session.email}</small>
+          </button>
+          <button type="button" className="icon-button" title="设置" onClick={() => setSettingsOpen(true)}>
+            <Settings size={17} />
+          </button>
+        </footer>
+      </aside>
+
       <section className="stage-zone">
         <Live2DStage
           model={selectedModel}
@@ -357,37 +456,30 @@ export default function App() {
           <div className="chat-title">
             <span className="chat-avatar"><Bot size={20} /></span>
             <div>
-              <h1>ShinobuChat</h1>
-              <p>{status}</p>
+              <h1>Shinobu</h1>
+              <p><span className="online-dot" />在线 · {status}</p>
             </div>
           </div>
           <div className="chat-header-actions">
             <button type="button" title="Refresh conversations" onClick={refreshConversations}><RefreshCw size={16} /></button>
-            <button type="button" title="New conversation" onClick={startNewConversation}><Plus size={16} /></button>
+            <button type="button" title="Toggle sidebar" onClick={() => setSidebarCollapsed(current => !current)}><PanelLeft size={16} /></button>
             <button type="button" title="Log out" onClick={logout}><LogOut size={16} /></button>
           </div>
         </header>
 
         {error ? <div className="error-banner">{error}</div> : null}
 
-        <div className="chat-layout">
-          <ConversationList
-            conversations={conversations}
-            activeId={conversationId}
-            onSelect={setConversationId}
+        <section className="conversation-pane">
+          <MessageList messages={messages} />
+          <Composer
+            disabled={streaming}
+            routeMode={routeMode}
+            galgameMode={galgameMode}
+            onRouteModeChange={setRouteMode}
+            onGalgameModeChange={setGalgameMode}
+            onSubmit={sendText}
           />
-          <section className="conversation-pane">
-            <MessageList messages={messages} />
-            <Composer
-              disabled={streaming}
-              routeMode={routeMode}
-              galgameMode={galgameMode}
-              onRouteModeChange={setRouteMode}
-              onGalgameModeChange={setGalgameMode}
-              onSubmit={sendText}
-            />
-          </section>
-        </div>
+        </section>
       </aside>
     </main>
   );
