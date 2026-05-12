@@ -74,6 +74,15 @@ class ChatService:
         )
         return self.compactor.compact(messages, conversation.summary or "", conversation_id)
 
+    def list_messages(self, conversation_id: UUID, user_id: UUID) -> list[Message]:
+        self._get_conversation_for_user(conversation_id, user_id)
+        return (
+            self.db.query(Message)
+            .filter(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.asc())
+            .all()
+        )
+
     def stream_reply(self, payload: MessageCreate):
         state = self._prepare_stream(payload)
         compact_result = self.get_messages(state.conversation.id, payload.user_id)

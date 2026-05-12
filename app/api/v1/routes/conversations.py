@@ -34,5 +34,5 @@ def list_conversation_messages(
     user_id: UUID,
     chat_service: ChatService = Depends(get_chat_service),
 ) -> list[MessageOut]:
-    messages = chat_service.get_messages(conversation_id, user_id)
+    messages = chat_service.list_messages(conversation_id, user_id)
     return [MessageOut.model_validate(item) for item in messages]

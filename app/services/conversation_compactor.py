@@ -16,6 +16,9 @@ class CompactResult:
     was_compacted: bool
     synthetic_message: Message | None = None
 
+    def __iter__(self):
+        return (message for message in self.messages if message is not self.synthetic_message)
+
 
 class ConversationCompactor:
     def __init__(self, max_messages: int = 30, keep_recent: int = 15):
