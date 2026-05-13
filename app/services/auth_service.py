@@ -1,5 +1,5 @@
-﻿from uuid import UUID
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 from fastapi import HTTPException, status
 from jose import jwt
@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.db_utils import require_user
+from app.core.exceptions import ConflictError
 from app.models.device import Device
 from app.models.user import User
 from app.schemas.user import UserCreate
@@ -22,7 +23,7 @@ class AuthService:
     def register_user(self, payload: UserCreate) -> User:
         existing = self.db.query(User).filter(User.email == payload.email).first()
         if existing:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+            raise ConflictError("Email already registered")
 
         user = User(
             email=payload.email,

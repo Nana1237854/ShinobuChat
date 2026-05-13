@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
@@ -8,18 +10,36 @@ from app.services.character_service import CharacterService
 from app.services.chat_service import ChatService
 from app.services.conversation_compactor import ConversationCompactor
 from app.services.decision_service import DecisionService
+from app.services.http_client import UrllibHttpClient
+from app.services.live2d_service import Live2DService
 from app.services.memory_service import MemoryService
 from app.services.message_service import MessageService
 from app.services.roleplay_service import RoleplayService
 from app.services.skill_service import SkillService
 from app.services.sync_service import SyncService
 from app.services.todo_service import TodoService
+from app.services.voice_service import VoiceService
 
 
 _character_service: CharacterService | None = None
 _decision_service: DecisionService | None = None
 _roleplay_service: RoleplayService | None = None
 _skill_service: SkillService | None = None
+
+
+@lru_cache
+def get_http_client() -> UrllibHttpClient:
+    return UrllibHttpClient()
+
+
+@lru_cache
+def get_voice_service() -> VoiceService:
+    return VoiceService(get_http_client())
+
+
+@lru_cache
+def get_live2d_service() -> Live2DService:
+    return Live2DService()
 
 
 def get_auth_service(db: Session = Depends(get_db)) -> AuthService:

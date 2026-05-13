@@ -1,4 +1,6 @@
 import asyncio
+from dataclasses import dataclass
+from pathlib import Path
 
 from app.core.config import settings
 from app.events.bus import bus
@@ -7,7 +9,66 @@ from app.schemas.decision import SkillCall
 from app.services.memory_service import MemoryService
 from app.services.todo_service import TodoService
 from app.skills.base import SkillError, SkillProgress
-from app.skills.registry import SkillRegistry
+from app.skills.registry import SkillRegistry as AppSkillRegistry
+
+
+@dataclass(frozen=True)
+class Skill:
+    name: str
+    content: str
+    keywords: tuple[str, ...] = ()
+
+
+class SkillRegistry:
+    """File-backed SKILL.md registry used by the tool-calling agent path."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self._skills = self._load()
+
+    def get(self, name: str) -> Skill | None:
+        return self._skills.get(name)
+
+    def match(self, content: str) -> list[Skill]:
+        normalized = content.lower()
+        matches: list[Skill] = []
+        for skill in self._skills.values():
+            if skill.name.lower() in normalized or any(keyword in normalized for keyword in skill.keywords):
+                matches.append(skill)
+        return matches
+
+    def render_catalog(self) -> str:
+        return "\n".join(f"- {skill.name}: {', '.join(skill.keywords) or 'general'}" for skill in self._skills.values())
+
+    def _load(self) -> dict[str, Skill]:
+        skills: dict[str, Skill] = {}
+        if not self.root.exists():
+            return skills
+
+        for skill_file in sorted(self.root.glob("*/SKILL.md")):
+            name = skill_file.parent.name
+            try:
+                content = skill_file.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            skills[name] = Skill(name=name, content=content, keywords=self._keywords(name, content))
+        return skills
+
+    def _keywords(self, name: str, content: str) -> tuple[str, ...]:
+        base = {name.replace("_", " "), name.replace("_", "-"), name}
+        lowered = content.lower()
+        hints = {
+            "weather": ("weather", "forecast", "天气", "预报"),
+            "web_search_aggregator": ("search", "web", "网页", "搜索"),
+            "todo_summary": ("todo", "task", "待办", "任务"),
+            "evening_review": ("review", "复盘", "总结"),
+            "screen_reader": ("screen", "screenshot", "屏幕", "截图"),
+            "inspiration_organizer": ("inspiration", "idea", "灵感", "想法"),
+        }
+        for key, values in hints.items():
+            if key == name or key in lowered:
+                base.update(values)
+        return tuple(sorted(base))
 
 
 class SkillService:
@@ -21,7 +82,7 @@ class SkillService:
         self.todo_service = todo_service
 
     async def execute(self, skill_call: SkillCall) -> None:
-        skill = SkillRegistry.get(skill_call.skill_name)
+        skill = AppSkillRegistry.get(skill_call.skill_name)
         if not skill:
             await bus.publish(
                 EventType.SKILL_ERROR,

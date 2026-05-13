@@ -125,3 +125,41 @@ export async function sendMessageStream(payload: {
 
   await consumeSseStream(response, payload.onEvent);
 }
+
+export async function transcribeSpeech(audio: Blob): Promise<{ text: string; engine: string }> {
+  const body = new FormData();
+  body.append('file', audio, `speech.${audio.type.includes('webm') ? 'webm' : 'wav'}`);
+  const response = await fetch(`${API_BASE}/voice/asr`, {
+    method: 'POST',
+    body,
+  });
+  return parseJsonResponse<{ text: string; engine: string }>(response);
+}
+
+export async function synthesizeSpeech(payload: {
+  text: string;
+  emotion?: string | null;
+  context?: string[];
+}): Promise<{ audio: Blob; emotion: string | null; reference: string | null }> {
+  const response = await fetch(`${API_BASE}/voice/tts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text: payload.text,
+      emotion: payload.emotion || null,
+      context: payload.context ?? [],
+    }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    const detail = data && typeof data === 'object' && 'detail' in data ? String(data.detail) : 'Voice synthesis failed';
+    throw new Error(detail);
+  }
+
+  return {
+    audio: await response.blob(),
+    emotion: response.headers.get('X-Shinobu-Voice-Emotion'),
+    reference: response.headers.get('X-Shinobu-Voice-Reference'),
+  };
+}

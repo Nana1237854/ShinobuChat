@@ -10,6 +10,7 @@ from app.api.v1.routes import (
     sync,
     todos,
     users,
+    voice,
 )
 
 api_router = APIRouter()
@@ -22,3 +23,4 @@ api_router.include_router(todos.router)
 api_router.include_router(sync.router)
 api_router.include_router(characters.router)
 api_router.include_router(live2d.router)
+api_router.include_router(voice.router)
