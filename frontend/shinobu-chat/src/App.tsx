@@ -106,7 +106,9 @@ export default function App() {
     setBackgrounds(nextBackgrounds);
     setTracks(nextTracks);
     setPetSettings(current => {
-      const modelId = current.modelId || nextModels[0]?.id;
+      const modelId = nextModels.some(item => item.id === current.modelId)
+        ? current.modelId
+        : nextModels[0]?.id || defaultPetSettings.modelId;
       const backgroundId = nextBackgrounds.some(item => item.id === current.backgroundId)
         ? current.backgroundId
         : nextBackgrounds[0]?.id || defaultPetSettings.backgroundId;

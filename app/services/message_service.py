@@ -1,11 +1,12 @@
-﻿import json
-import time
+import json
 from dataclasses import dataclass
 from datetime import datetime
+from urllib import error, request
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.user import User
@@ -26,7 +27,7 @@ class MessageService:
         self.db = db
         self.conversations = ConversationService(db)
 
-    def prepare_stream(self, payload: MessageCreate) -> MessageStreamState:
+    def prepare_stream(self, payload: MessageCreate) -> tuple[MessageStreamState, list[dict[str, str]]]:
         user = self.db.query(User).filter(User.id == payload.user_id).first()
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -48,20 +49,15 @@ class MessageService:
         self.db.refresh(user_message)
 
         history = self.conversations.list_messages(conversation.id, payload.user_id)
-        reply_text = self._build_reply(payload.content.strip(), payload.route_mode, history[:-1])
-        return MessageStreamState(
+        messages = self._build_ai_messages(payload.content.strip(), payload.route_mode, history[:-1])
+
+        state = MessageStreamState(
             conversation=conversation,
             user_message=user_message,
             route_mode=payload.route_mode,
-            reply_text=reply_text,
+            reply_text="",
         )
-
-    def stream_chunks(self, text: str) -> list[str]:
-        normalized = text.strip()
-        if len(normalized) <= 24:
-            return [normalized]
-        chunk_size = 18
-        return [normalized[index : index + chunk_size] for index in range(0, len(normalized), chunk_size)]
+        return state, messages
 
     def save_assistant_message(self, state: MessageStreamState) -> Message:
         assistant_message = Message(
@@ -80,7 +76,9 @@ class MessageService:
         return assistant_message
 
     def create_streaming_response(self, payload: MessageCreate):
-        state = self.prepare_stream(payload)
+        state, messages = self.prepare_stream(payload)
+
+        max_tokens = settings.ai_lightweight_max_tokens
 
         def event_stream():
             yield self._format_event(
@@ -93,10 +91,18 @@ class MessageService:
                 },
             )
 
-            for chunk in self.stream_chunks(state.reply_text):
+            full_reply = ""
+            for chunk in self._call_ai_stream(messages, max_tokens=max_tokens):
+                full_reply += chunk
                 yield self._format_event("chunk", {"delta": chunk})
-                time.sleep(0.04)
 
+            if not full_reply:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="AI API returned an empty response",
+                )
+
+            state.reply_text = full_reply
             assistant_message = self.save_assistant_message(state)
             yield self._format_event(
                 "done",
@@ -108,31 +114,112 @@ class MessageService:
 
         return event_stream()
 
+    def _build_ai_messages(
+        self,
+        content: str,
+        route_mode: RouteMode,
+        history: list[Message],
+    ) -> list[dict[str, str]]:
+        if route_mode is RouteMode.CHAT:
+            mode_instruction = "当前是纯聊天模式，优先自然陪伴、澄清想法，用1-3句话简短回复。"
+        elif route_mode is RouteMode.AGENT:
+            mode_instruction = "当前是 Agent 模式，优先把用户意图整理成可执行动作，并明确下一步。"
+        else:
+            mode_instruction = "当前是自动决策模式，先自然回应，再判断是否需要推进成任务流。"
+
+        messages: list[dict[str, str]] = [
+            {
+                "role": MessageRole.SYSTEM.value,
+                "content": (
+                    "你是 ShinobuChat 的 AI 伴侣。用简洁、温暖、可靠的中文回复用户。"
+                    f"{mode_instruction}"
+                ),
+            }
+        ]
+        for message in history[-12:]:
+            if message.role in {MessageRole.USER.value, MessageRole.ASSISTANT.value}:
+                messages.append({"role": message.role, "content": message.content})
+        messages.append({"role": MessageRole.USER.value, "content": content})
+        return messages
+
+    def _call_ai_stream(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int | None = None,
+    ):
+        if not settings.ai_api_key or settings.ai_api_key == "your-api-key":
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AI API key is not configured",
+            )
+
+        body: dict = {
+            "model": settings.ai_model,
+            "messages": messages,
+            "temperature": 0.7,
+            "stream": True,
+        }
+        if max_tokens:
+            body["max_tokens"] = max_tokens
+
+        endpoint = f"{settings.ai_base_url.rstrip('/')}/chat/completions"
+        req = request.Request(
+            endpoint,
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {settings.ai_api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            resp = request.urlopen(req, timeout=settings.ai_request_timeout_seconds)
+        except error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"AI API request failed: {detail}",
+            ) from exc
+        except (error.URLError, TimeoutError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"AI API request failed: {exc}",
+            ) from exc
+
+        buffer = b""
+        try:
+            while True:
+                data = resp.read(4096)
+                if not data:
+                    break
+                buffer += data
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    line = line.strip()
+                    if not line or line == b"data: [DONE]":
+                        continue
+                    if line.startswith(b"data: "):
+                        try:
+                            chunk_data = json.loads(line[6:])
+                            delta = chunk_data.get("choices", [{}])[0].get("delta", {})
+                            token = delta.get("content", "")
+                            if token:
+                                yield token
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            pass
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"AI stream failed: {exc}",
+            ) from exc
+
     def _resolve_conversation(self, payload: MessageCreate) -> Conversation:
         if payload.conversation_id:
             return self.conversations.get_for_user(payload.conversation_id, payload.user_id)
         return self.conversations.create_for_user(
             payload.user_id,
             title=self._build_title(payload.content),
-        )
-
-    def _build_reply(self, content: str, route_mode: RouteMode, history: list[Message]) -> str:
-        history_prefix = "这是这段对话的第一轮，" if not history else f"我接着前面 {len(history)} 条上下文继续，"
-        if route_mode is RouteMode.CHAT:
-            mode_prefix = "现在是纯聊天模式，我先陪你把想法说清楚。"
-        elif route_mode is RouteMode.AGENT:
-            mode_prefix = "现在按 Agent 模式处理，我先把它整理成可执行动作。"
-        else:
-            mode_prefix = "现在是自动决策模式，我会先接住消息，再判断是否需要升级成任务流。"
-
-        focus = content.replace("\r", " ").replace("\n", " ").strip()
-        if len(focus) > 80:
-            focus = f"{focus[:77]}..."
-
-        return (
-            f"{mode_prefix}{history_prefix}"
-            f"你刚刚提到“{focus}”。"
-            " 我建议下一步继续补充目标、约束和时间点，这样我们就能稳定地走成单轮确认或多轮推进。"
         )
 
     def _build_title(self, content: str) -> str:

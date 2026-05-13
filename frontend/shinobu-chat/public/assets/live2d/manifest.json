@@ -1,35 +1,23 @@
 {
   "models": [
     {
-      "id": "little-seal",
-      "name": "小海豹",
-      "entry": "/assets/live2d/小海豹完整版/小海豹.model3.json",
-      "thumbnail": "/assets/live2d/小海豹完整版/icon1.png",
-      "defaultScale": 0.22,
+      "id": "mao_pro_en",
+      "name": "Mao Pro EN",
+      "entry": "/assets/live2d/mao_pro_en/runtime/mao_pro.model3.json",
+      "defaultScale": 0.32,
       "defaultX": 52,
-      "defaultY": 74,
+      "defaultY": 72,
       "emotionMapping": {
-        "neutral": { "motion": "idle" },
-        "happy": { "expression": "sparkle_eyes", "motion": "idle" },
-        "joy": { "expression": "sparkle_eyes", "motion": "idle" },
-        "excited": { "expression": "sparkle_eyes", "motion": "idle" },
-        "love": { "expression": "heart_eyes", "motion": "idle" },
-        "affection": { "expression": "heart_eyes", "motion": "idle" },
-        "sad": { "expression": "crying", "motion": "idle" },
-        "angry": { "expression": "angry", "motion": "idle" },
-        "frustrated": { "expression": "angry", "motion": "idle" },
-        "embarrassed": { "expression": "blush", "motion": "idle" },
-        "shy": { "expression": "blush", "motion": "idle" },
-        "surprised": { "expression": "dizzy", "motion": "idle" },
-        "confused": { "expression": "dizzy", "motion": "idle" },
-        "fear": { "expression": "dark_face", "motion": "idle" },
-        "anxious": { "expression": "dark_face", "motion": "idle" },
-        "tired": { "expression": "yawn", "motion": "idle" },
-        "sleepy": { "expression": "yawn", "motion": "idle" },
-        "bored": { "expression": "side_eye", "motion": "idle" },
-        "annoyed": { "expression": "side_eye", "motion": "idle" },
-        "comfort": { "expression": "hug_seal", "motion": "idle" },
-        "calm": { "expression": "hug_seal", "motion": "idle" }
+        "neutral": { "motion": "Idle" },
+        "happy": { "expression": "exp_01", "motion": "Idle" },
+        "joy": { "expression": "exp_01", "motion": "Idle" },
+        "excited": { "expression": "exp_02", "motion": "Idle" },
+        "love": { "expression": "exp_03", "motion": "Idle" },
+        "sad": { "expression": "exp_04", "motion": "Idle" },
+        "angry": { "expression": "exp_05", "motion": "Idle" },
+        "embarrassed": { "expression": "exp_06", "motion": "Idle" },
+        "surprised": { "expression": "exp_07", "motion": "Idle" },
+        "confused": { "expression": "exp_08", "motion": "Idle" }
       }
     }
   ]
