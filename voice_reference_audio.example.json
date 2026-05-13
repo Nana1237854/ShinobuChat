@@ -1,0 +1,44 @@
+{
+  "default": {
+    "ref_audio_path": "D:/voices/shinobu/neutral.wav",
+    "prompt_text": "你好，我是 Shinobu。",
+    "prompt_lang": "zh",
+    "text_lang": "zh"
+  },
+  "neutral": {
+    "ref_audio_path": "D:/voices/shinobu/neutral.wav",
+    "prompt_text": "你好，我是 Shinobu。",
+    "prompt_lang": "zh",
+    "text_lang": "zh"
+  },
+  "happy": {
+    "ref_audio_path": "D:/voices/shinobu/happy.wav",
+    "prompt_text": "今天也很高兴见到你。",
+    "prompt_lang": "zh",
+    "text_lang": "zh"
+  },
+  "sad": {
+    "ref_audio_path": "D:/voices/shinobu/soft.wav",
+    "prompt_text": "没关系，我会在这里陪着你。",
+    "prompt_lang": "zh",
+    "text_lang": "zh"
+  },
+  "angry": {
+    "ref_audio_path": "D:/voices/shinobu/firm.wav",
+    "prompt_text": "这件事确实需要认真处理。",
+    "prompt_lang": "zh",
+    "text_lang": "zh"
+  },
+  "surprised": {
+    "ref_audio_path": "D:/voices/shinobu/surprised.wav",
+    "prompt_text": "诶，原来是这样吗？",
+    "prompt_lang": "zh",
+    "text_lang": "zh"
+  },
+  "thinking": {
+    "ref_audio_path": "D:/voices/shinobu/thinking.wav",
+    "prompt_text": "让我想一想下一步怎么做。",
+    "prompt_lang": "zh",
+    "text_lang": "zh"
+  }
+}

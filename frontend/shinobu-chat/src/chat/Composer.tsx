@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Gamepad2, Plus, Send } from 'lucide-react';
+import { Gamepad2, Mic, Plus, Send, Square } from 'lucide-react';
 import type { RouteMode } from '../types';
 
 type ComposerProps = {
@@ -9,6 +9,7 @@ type ComposerProps = {
   onRouteModeChange: (mode: RouteMode) => void;
   onGalgameModeChange: (enabled: boolean) => void;
   onSubmit: (text: string) => void;
+  onVoiceInput: (audio: Blob) => Promise<void>;
 };
 
 const routeModes: Array<{ value: RouteMode; label: string }> = [
@@ -30,14 +31,47 @@ export function Composer({
   onRouteModeChange,
   onGalgameModeChange,
   onSubmit,
+  onVoiceInput,
 }: ComposerProps) {
   const [draft, setDraft] = useState('');
+  const [recording, setRecording] = useState(false);
+  const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
 
   const submit = (text = draft) => {
     const trimmed = text.trim();
     if (!trimmed || disabled) return;
     onSubmit(trimmed);
     setDraft('');
+  };
+
+  const toggleRecording = async () => {
+    if (recording && recorder) {
+      recorder.stop();
+      return;
+    }
+    if (disabled || !navigator.mediaDevices?.getUserMedia) return;
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const chunks: Blob[] = [];
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : '';
+    const nextRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    nextRecorder.ondataavailable = event => {
+      if (event.data.size > 0) chunks.push(event.data);
+    };
+    nextRecorder.onstop = () => {
+      stream.getTracks().forEach(track => track.stop());
+      setRecording(false);
+      setRecorder(null);
+      const audio = new Blob(chunks, { type: nextRecorder.mimeType || 'audio/webm' });
+      if (audio.size > 0) {
+        onVoiceInput(audio).catch(() => {});
+      }
+    };
+    setRecorder(nextRecorder);
+    setRecording(true);
+    nextRecorder.start();
   };
 
   return (
@@ -72,6 +106,17 @@ export function Composer({
           onClick={() => onGalgameModeChange(!galgameMode)}
         >
           <Gamepad2 size={16} />
+        </button>
+        <button
+          className={recording ? 'tool-toggle is-active' : 'tool-toggle'}
+          type="button"
+          title={recording ? 'Stop recording' : 'Voice input'}
+          disabled={disabled && !recording}
+          onClick={() => {
+            toggleRecording().catch(() => {});
+          }}
+        >
+          {recording ? <Square size={15} /> : <Mic size={16} />}
         </button>
       </div>
       <form

@@ -2,9 +2,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException, status
-
 from app.core.config import settings
+from app.core.exceptions import NotFoundError, UpstreamServiceError
 from app.schemas.live2d import Live2DEmotionMapping, Live2DEmotionMappingItem, Live2DModelItem
 
 
@@ -60,7 +59,7 @@ class Live2DService:
             aliases = {model_dir.name, str(record["id"]), str(record["name"])}
             if model_name in aliases:
                 return record
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Live2D model not found")
+        raise NotFoundError("Live2D model not found")
 
     def _find_model_manifest(self, model_name: str) -> tuple[Path, dict[str, Any]]:
         for model_dir in self.live2d_dir.iterdir() if self.live2d_dir.exists() else []:
@@ -73,7 +72,7 @@ class Live2DService:
             aliases = {model_dir.name, str(record["id"]), str(record["name"])}
             if model_name in aliases:
                 return model_dir, manifest
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Live2D model not found")
+        raise NotFoundError("Live2D model not found")
 
     def _read_model_record(self, model_dir: Path) -> dict[str, Any] | None:
         manifest = self._read_manifest(model_dir)
@@ -90,10 +89,7 @@ class Live2DService:
         try:
             return json.loads(manifest_path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError) as error:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to read Live2D manifest for {model_dir.name}: {error}",
-            ) from error
+            raise UpstreamServiceError(f"Failed to read Live2D manifest for {model_dir.name}: {error}") from error
 
     def _infer_manifest(self, model_dir: Path) -> dict[str, Any] | None:
         entry = sorted(model_dir.glob("*.model3.json"))

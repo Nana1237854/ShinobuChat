@@ -32,6 +32,8 @@ import {
   loginWithDeviceFlow,
   registerUser,
   sendMessageStream,
+  synthesizeSpeech,
+  transcribeSpeech,
 } from './api/client';
 import {
   loadBackgrounds,
@@ -97,6 +99,9 @@ export default function App() {
   const [activeEmotion, setActiveEmotion] = useState<string | null>(null);
   const [petFeedback, setPetFeedback] = useState<string | null>(null);
   const [galgameMode, setGalgameMode] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+  const voiceReplyRequestedRef = useRef(false);
 
   const reloadAssets = useCallback(async () => {
     const [nextModels, nextBackgrounds, nextTracks] = await Promise.all([
@@ -158,6 +163,11 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('shinobu-route-mode', routeMode);
   }, [routeMode]);
+
+  useEffect(() => () => {
+    audioRef.current?.pause();
+    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+  }, []);
 
   const refreshConversations = useCallback(async () => {
     if (!session) return;
@@ -237,6 +247,33 @@ export default function App() {
     }
   };
 
+  const playAssistantVoice = useCallback(async (message: ApiMessage) => {
+    if (!message.content.trim()) return;
+    try {
+      setStatus('Synthesizing voice...');
+      const speech = await synthesizeSpeech({
+        text: message.content,
+        emotion: message.emotion,
+        context: messages.slice(-6).map(item => item.content),
+      });
+      if (speech.emotion) setActiveEmotion(speech.emotion);
+
+      audioRef.current?.pause();
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+      const url = URL.createObjectURL(speech.audio);
+      audioUrlRef.current = url;
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onplay = () => setStatus('Speaking...');
+      audio.onended = () => setStatus('Ready');
+      audio.onerror = () => setStatus('Voice playback failed');
+      await audio.play();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Voice synthesis failed');
+      setStatus('Voice synthesis failed');
+    }
+  }, [messages]);
+
   const sendText = async (text: string) => {
     if (!session || streaming) return;
     const content = text.trim();
@@ -299,6 +336,10 @@ export default function App() {
           if (event.type === 'done') {
             setMessages(current => completeAssistantMessage(current, pendingId, toChatMessage(event.assistantMessage)));
             updateAvatarEmotion(event.assistantMessage);
+            if (voiceReplyRequestedRef.current) {
+              voiceReplyRequestedRef.current = false;
+              void playAssistantVoice(event.assistantMessage);
+            }
             refreshConversations();
           }
         },
@@ -313,6 +354,21 @@ export default function App() {
     } finally {
       pendingId = '';
       setStreaming(false);
+    }
+  };
+
+  const sendVoiceInput = async (audio: Blob) => {
+    if (!session || streaming) return;
+    try {
+      setError(null);
+      setStatus('Transcribing voice...');
+      const transcript = await transcribeSpeech(audio);
+      voiceReplyRequestedRef.current = true;
+      await sendText(transcript.text);
+    } catch (nextError) {
+      voiceReplyRequestedRef.current = false;
+      setError(nextError instanceof Error ? nextError.message : 'Voice recognition failed');
+      setStatus('Voice recognition failed');
     }
   };
 
@@ -502,6 +558,7 @@ export default function App() {
             onRouteModeChange={setRouteMode}
             onGalgameModeChange={setGalgameMode}
             onSubmit={sendText}
+            onVoiceInput={sendVoiceInput}
           />
         </section>
       </aside>

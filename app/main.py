@@ -4,9 +4,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.api.error_handlers import app_error_handler
 from app.api.v1.api import api_router
 from app.api.v1.routes import live2d as live2d_routes
 from app.core.config import settings
+from app.core.exceptions import AppError
 from app.db.init_db import init_db
 
 FRONTEND_DIST_PATH = Path(__file__).resolve().parent.parent / "frontend" / "shinobu-chat" / "dist"
@@ -14,6 +16,7 @@ FRONTEND_DIST_PATH = Path(__file__).resolve().parent.parent / "frontend" / "shin
 
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, version="0.1.0")
+    app.add_exception_handler(AppError, app_error_handler)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

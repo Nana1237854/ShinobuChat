@@ -1,9 +1,9 @@
 ﻿from datetime import datetime
 from uuid import UUID
 
-from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import NotFoundError
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.schemas.conversation import ConversationCreate
@@ -46,13 +46,13 @@ class ConversationService:
     def get(self, conversation_id: UUID) -> Conversation:
         conversation = self.db.query(Conversation).filter(Conversation.id == conversation_id).first()
         if not conversation:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+            raise NotFoundError("Conversation not found")
         return conversation
 
     def get_for_user(self, conversation_id: UUID, user_id: UUID) -> Conversation:
         conversation = self.get(conversation_id)
         if conversation.user_id != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+            raise NotFoundError("Conversation not found")
         return conversation
 
     def list_messages(self, conversation_id: UUID, user_id: UUID) -> list[Message]:
