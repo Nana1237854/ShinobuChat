@@ -1,0 +1,20 @@
+{
+  "id": "mao_pro_en",
+  "name": "Mao Pro EN",
+  "entry": "runtime/mao_pro.model3.json",
+  "defaultScale": 0.32,
+  "defaultX": 52,
+  "defaultY": 72,
+  "emotionMapping": {
+    "neutral": { "motion": "Idle" },
+    "happy": { "expression": "exp_01", "motion": "Idle" },
+    "joy": { "expression": "exp_01", "motion": "Idle" },
+    "excited": { "expression": "exp_02", "motion": "Idle" },
+    "love": { "expression": "exp_03", "motion": "Idle" },
+    "sad": { "expression": "exp_04", "motion": "Idle" },
+    "angry": { "expression": "exp_05", "motion": "Idle" },
+    "embarrassed": { "expression": "exp_06", "motion": "Idle" },
+    "surprised": { "expression": "exp_07", "motion": "Idle" },
+    "confused": { "expression": "exp_08", "motion": "Idle" }
+  }
+}
