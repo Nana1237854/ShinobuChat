@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bot,
   ChevronLeft,
@@ -20,6 +20,7 @@ import { ConversationList } from './chat/ConversationList';
 import { MessageList } from './chat/MessageList';
 import { Composer } from './chat/Composer';
 import { CharacterEditor } from './chat/CharacterEditor';
+import { completeAssistantMessage, mergeServerMessages } from './chat/messageState';
 import { Live2DStage } from './live2d/Live2DStage';
 import { PetTaskbar } from './desktop-pet/PetTaskbar';
 import { PetSettingsPanel } from './desktop-pet/PetSettingsPanel';
@@ -82,6 +83,7 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [routeMode, setRouteMode] = useState<RouteMode>(() => (localStorage.getItem('shinobu-route-mode') as RouteMode) || 'auto');
   const [streaming, setStreaming] = useState(false);
+  const streamingRef = useRef(streaming);
   const [status, setStatus] = useState('Ready');
   const [error, setError] = useState<string | null>(null);
   const [models, setModels] = useState<Live2DModelItem[]>([]);
@@ -150,6 +152,10 @@ export default function App() {
   }, [petSettings]);
 
   useEffect(() => {
+    streamingRef.current = streaming;
+  }, [streaming]);
+
+  useEffect(() => {
     localStorage.setItem('shinobu-route-mode', routeMode);
   }, [routeMode]);
 
@@ -173,7 +179,10 @@ export default function App() {
     }
     localStorage.setItem('shinobu-conversation-id', conversationId);
     listMessages(conversationId, session.userId)
-      .then(items => setMessages(items.map(toChatMessage)))
+      .then(items => {
+        const serverMessages = items.map(toChatMessage);
+        setMessages(current => mergeServerMessages(current, serverMessages, streamingRef.current));
+      })
       .catch(nextError => {
         setError(nextError instanceof Error ? nextError.message : 'Failed to load messages');
         localStorage.removeItem('shinobu-conversation-id');
@@ -237,6 +246,7 @@ export default function App() {
     setStatus('Shinobu is replying...');
 
     let pendingId = `pending-${Date.now()}`;
+    let streamConversationId = conversationId;
     try {
       await sendMessageStream({
         userId: session.userId,
@@ -245,6 +255,7 @@ export default function App() {
         routeMode,
         onEvent: event => {
           if (event.type === 'conversation') {
+            streamConversationId = event.conversationId;
             setConversationId(event.conversationId);
             localStorage.setItem('shinobu-conversation-id', event.conversationId);
             setMessages(current => {
@@ -264,7 +275,7 @@ export default function App() {
                 ...current,
                 {
                   id: pendingId,
-                  conversation_id: conversationId || 'pending',
+                  conversation_id: streamConversationId || 'pending',
                   role: 'assistant',
                   content: event.delta,
                   route_mode: routeMode,
@@ -286,10 +297,7 @@ export default function App() {
             setStatus('Action failed');
           }
           if (event.type === 'done') {
-            setMessages(current => [
-              ...current.filter(item => item.id !== pendingId),
-              toChatMessage(event.assistantMessage),
-            ]);
+            setMessages(current => completeAssistantMessage(current, pendingId, toChatMessage(event.assistantMessage)));
             updateAvatarEmotion(event.assistantMessage);
             refreshConversations();
           }
