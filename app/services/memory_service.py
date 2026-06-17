@@ -1,223 +1,207 @@
 from __future__ import annotations
 
-from datetime import datetime
-from uuid import UUID
+import json
+import math
+import re
+import uuid
+from dataclasses import dataclass
+from typing import Callable
 
-from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.db_utils import require_user
-from app.models.memory import Memory, MemoryPreference
-from app.schemas.memory import (
-    MemoryCategory,
-    MemoryCreate,
-    MemoryOut,
-    MemoryPreferenceUpdate,
-    MemorySearchHit,
-    MemorySearchRequest,
-    MemoryUpdate,
-)
+from app.db.session import SessionLocal
+from app.models.memory import Memory, Vector
+from app.schemas.message import MessageRole
+from app.services.ai_client import AIClient
 from app.services.embedding_service import EmbeddingService
-from app.services.realtime_sync_service import realtime_sync_service
-from app.services.sync_service import SyncService
+
+
+@dataclass(frozen=True)
+class MemoryCandidate:
+    content: str
+    importance: float = 0.5
 
 
 class MemoryService:
-    def __init__(self, db: Session, sync: SyncService):
-        self.db = db
-        self.embedding = EmbeddingService(db)
-        self.sync = sync
-
-    def create(self, payload: MemoryCreate) -> Memory:
-        require_user(self.db, payload.user_id)
-        self._ensure_inference_allowed(payload.user_id, payload.inferred)
-        embedding = self.embedding.embed(f"{payload.title} {payload.content} {' '.join(payload.tags)}")
-        memory = Memory(
-            user_id=payload.user_id,
-            category=payload.category.value,
-            title=payload.title.strip(),
-            content=payload.content.strip(),
-            source=payload.source.strip(),
-            importance=payload.importance,
-            pinned=payload.pinned,
-            tags=self._clean_tags(payload.tags),
-            emotion_label=self._clean_optional(payload.emotion_label),
-            inferred=payload.inferred,
-            confidence=payload.confidence,
-            embedding_model=settings.memory_embedding_model,
-            embedding=embedding,
-        )
-        self.db.add(memory)
-        self.db.commit()
-        self.db.refresh(memory)
-        self.sync.record_server_change(
-            memory.user_id,
-            "memory",
-            memory.id,
-            "upsert",
-            MemoryOut.model_validate(memory).model_dump(mode="json"),
-            memory.updated_at,
-        )
-        self._publish("memory.created", memory)
-        return memory
-
-    def list_by_user(
+    def __init__(
         self,
-        user_id: UUID,
-        category: MemoryCategory | None = None,
-        include_archived: bool = False,
-    ) -> list[Memory]:
-        require_user(self.db, user_id)
-        query = self.db.query(Memory).filter(Memory.user_id == user_id)
-        if category:
-            query = query.filter(Memory.category == category.value)
-        if not include_archived:
-            query = query.filter(Memory.archived.is_(False))
-        return query.order_by(Memory.pinned.desc(), Memory.updated_at.desc()).all()
+        embedding_service: EmbeddingService,
+        ai_client: AIClient,
+        session_factory: Callable[[], Session] = SessionLocal,
+        *,
+        enabled: bool | None = None,
+        max_results: int | None = None,
+    ):
+        self.embedding_service = embedding_service
+        self.ai_client = ai_client
+        self.session_factory = session_factory
+        self.enabled = settings.memory_pgvector_enabled if enabled is None else enabled
+        self.max_results = max_results or settings.memory_max_results
 
-    def search(self, payload: MemorySearchRequest) -> list[MemorySearchHit]:
-        require_user(self.db, payload.user_id)
-        query_embedding = self.embedding.embed(payload.query)
-        return self.embedding.search(
-            payload.user_id,
-            query_embedding,
-            category=payload.category,
-            limit=payload.limit,
-            min_similarity=payload.min_similarity,
-            include_archived=payload.include_archived,
-        )
-
-    def update(self, memory_id: UUID, user_id: UUID, payload: MemoryUpdate) -> Memory:
-        memory = self.get_for_user(memory_id, user_id, include_archived=True)
-        updates = payload.model_dump(exclude_unset=True)
-        should_refresh_embedding = False
-
-        for key, value in updates.items():
-            if isinstance(value, str):
-                value = value.strip()
-            if key == "category" and value is not None:
-                value = value.value
-                should_refresh_embedding = True
-            if key in {"title", "content", "tags"}:
-                should_refresh_embedding = True
-            if key == "tags" and value is not None:
-                value = self._clean_tags(value)
-            if key == "emotion_label":
-                value = self._clean_optional(value)
-            if key == "archived":
-                memory.archived_at = datetime.utcnow() if value else None
-                memory.archived_reason = "manual_archive" if value else None
-            setattr(memory, key, value)
-
-        if should_refresh_embedding:
-            memory.embedding = self.embedding.embed(f"{memory.title} {memory.content} {' '.join(memory.tags)}")
-            memory.embedding_model = settings.memory_embedding_model
-
-        memory.updated_at = datetime.utcnow()
-        self.db.add(memory)
-        self.db.commit()
-        self.db.refresh(memory)
-        self.sync.record_server_change(
-            memory.user_id,
-            "memory",
-            memory.id,
-            "upsert",
-            MemoryOut.model_validate(memory).model_dump(mode="json"),
-            memory.updated_at,
-        )
-        self._publish("memory.updated", memory)
-        return memory
-
-    def undo_inference(self, memory_id: UUID, user_id: UUID) -> Memory:
-        memory = self.get_for_user(memory_id, user_id, include_archived=True)
-        if not memory.inferred:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Only inferred memories can be undone",
-            )
-        memory.archived = True
-        memory.archived_reason = "user_undo_inference"
-        memory.archived_at = datetime.utcnow()
-        memory.updated_at = datetime.utcnow()
-        self.db.add(memory)
-        self.db.commit()
-        self.db.refresh(memory)
-        self.sync.record_server_change(
-            memory.user_id,
-            "memory",
-            memory.id,
-            "upsert",
-            MemoryOut.model_validate(memory).model_dump(mode="json"),
-            memory.updated_at,
-        )
-        self._publish("memory.inference_undone", memory)
-        return memory
-
-    def delete(self, memory_id: UUID, user_id: UUID) -> None:
-        memory = self.get_for_user(memory_id, user_id, include_archived=True)
-        payload = MemoryOut.model_validate(memory).model_dump(mode="json")
-        self.sync.record_server_change(user_id, "memory", memory.id, "delete", payload, datetime.utcnow())
-        self.db.delete(memory)
-        self.db.commit()
-        realtime_sync_service.publish(user_id, "memory.deleted", {"memory": payload})
-
-    def get_for_user(self, memory_id: UUID, user_id: UUID, include_archived: bool = False) -> Memory:
-        query = self.db.query(Memory).filter(Memory.id == memory_id, Memory.user_id == user_id)
-        if not include_archived:
-            query = query.filter(Memory.archived.is_(False))
-        memory = query.first()
-        if not memory:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Memory not found")
-        return memory
-
-    def get_preferences(self, user_id: UUID) -> MemoryPreference:
-        require_user(self.db, user_id)
-        preference = self.db.query(MemoryPreference).filter(MemoryPreference.user_id == user_id).first()
-        if preference:
-            return preference
-        preference = MemoryPreference(user_id=user_id, enabled=True)
-        self.db.add(preference)
-        self.db.commit()
-        self.db.refresh(preference)
-        return preference
-
-    def update_preferences(self, user_id: UUID, payload: MemoryPreferenceUpdate) -> MemoryPreference:
-        preference = self.get_preferences(user_id)
-        preference.enabled = payload.enabled
-        preference.updated_at = datetime.utcnow()
-        self.db.add(preference)
-        self.db.commit()
-        self.db.refresh(preference)
-        realtime_sync_service.publish(
-            user_id,
-            "memory.preference_updated",
-            {"memory_enabled": preference.enabled, **realtime_sync_service.status_payload(user_id)},
-        )
-        return preference
-
-    def _ensure_inference_allowed(self, user_id: UUID, inferred: bool) -> None:
-        if inferred and not self.get_preferences(user_id).enabled:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Memory inference is paused for this user",
-            )
-
-    def _publish(self, event_type: str, memory: Memory) -> None:
-        realtime_sync_service.publish(
-            memory.user_id,
-            event_type,
-            {
-                "memory": MemoryOut.model_validate(memory).model_dump(mode="json"),
-                **realtime_sync_service.status_payload(memory.user_id),
-            },
-        )
-
-    def _clean_tags(self, tags: list[str]) -> list[str]:
-        return [tag.strip()[:40] for tag in tags if tag and tag.strip()][:12]
-
-    def _clean_optional(self, value: str | None) -> str | None:
-        if value is None:
+    def store_memory(
+        self,
+        user_id: uuid.UUID,
+        content: str,
+        embedding: list[float] | None = None,
+        *,
+        source_msg_id: uuid.UUID | None = None,
+        importance: float = 0.5,
+    ) -> Memory | None:
+        if not self.enabled:
             return None
-        cleaned = value.strip()
-        return cleaned or None
+
+        memory_content = " ".join(content.strip().split())
+        if not memory_content:
+            return None
+
+        vector = embedding if embedding is not None else self.embedding_service.embed(memory_content)
+        if not vector:
+            return None
+
+        memory = Memory(
+            user_id=user_id,
+            content=memory_content,
+            embedding=vector,
+            source_msg_id=source_msg_id,
+            importance=max(0.0, min(float(importance), 1.0)),
+        )
+        with self.session_factory() as db:
+            db.add(memory)
+            db.commit()
+            db.refresh(memory)
+            db.expunge(memory)
+        return memory
+
+    def search_memories(
+        self,
+        user_id: uuid.UUID,
+        query: str,
+        *,
+        top_k: int | None = None,
+    ) -> list[Memory]:
+        if not self.enabled:
+            return []
+
+        query_embedding = self.embedding_service.embed(query)
+        if not query_embedding:
+            return []
+
+        limit = max(top_k or self.max_results, 1)
+        with self.session_factory() as db:
+            if self._can_use_pgvector(db):
+                memories = (
+                    db.query(Memory)
+                    .filter(Memory.user_id == user_id)
+                    .order_by(Memory.embedding.cosine_distance(query_embedding))
+                    .limit(limit)
+                    .all()
+                )
+            else:
+                candidates = db.query(Memory).filter(Memory.user_id == user_id).all()
+                memories = sorted(
+                    candidates,
+                    key=lambda memory: self._cosine_distance(query_embedding, self._as_vector(memory.embedding)),
+                )[:limit]
+            for memory in memories:
+                db.expunge(memory)
+            return memories
+
+    def extract_memories(self, conversation_text: str) -> list[MemoryCandidate]:
+        text = conversation_text.strip()
+        if not self.enabled or not text:
+            return []
+
+        messages = [
+            {
+                "role": MessageRole.SYSTEM.value,
+                "content": (
+                    "你是 ShinobuChat 的长期记忆提取器。只提取对未来对话有帮助的稳定事实，"
+                    "例如用户姓名、偏好、长期目标、重要经历、常用设置。"
+                    "不要保存临时寒暄、一次性任务结果或敏感信息。"
+                    "请只输出 JSON 数组，每项格式为 {\"content\": \"...\", \"importance\": 0.0-1.0}。"
+                    "如果没有值得保存的内容，输出 []。"
+                ),
+            },
+            {"role": MessageRole.USER.value, "content": text},
+        ]
+        response = self.ai_client.complete_chat(messages, max_tokens=512)
+        content = str(response.get("content") or "").strip()
+        return self._parse_candidates(content)
+
+    def extract_and_store_after_turn(
+        self,
+        *,
+        user_id: uuid.UUID,
+        user_text: str,
+        assistant_text: str,
+        source_msg_id: uuid.UUID | None,
+    ) -> int:
+        if not self.enabled:
+            return 0
+
+        conversation_text = f"用户：{user_text.strip()}\n助手：{assistant_text.strip()}"
+        stored = 0
+        try:
+            candidates = self.extract_memories(conversation_text)
+            for candidate in candidates:
+                if self.store_memory(
+                    user_id,
+                    candidate.content,
+                    source_msg_id=source_msg_id,
+                    importance=candidate.importance,
+                ):
+                    stored += 1
+        except Exception as exc:  # Keep memory write failures off the user-visible reply path.
+            print(f"[MEMORY] skipped memory write: {exc}")
+        return stored
+
+    def _parse_candidates(self, content: str) -> list[MemoryCandidate]:
+        if not content:
+            return []
+
+        payload = content
+        fenced = re.search(r"```(?:json)?\s*(.*?)```", content, flags=re.DOTALL | re.IGNORECASE)
+        if fenced:
+            payload = fenced.group(1).strip()
+
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            return []
+
+        if not isinstance(data, list):
+            return []
+
+        candidates: list[MemoryCandidate] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            memory_content = str(item.get("content") or "").strip()
+            if not memory_content:
+                continue
+            importance = item.get("importance", 0.5)
+            try:
+                score = max(0.0, min(float(importance), 1.0))
+            except (TypeError, ValueError):
+                score = 0.5
+            candidates.append(MemoryCandidate(memory_content, score))
+        return candidates
+
+    def _can_use_pgvector(self, db: Session) -> bool:
+        return Vector is not None and db.bind is not None and db.bind.dialect.name == "postgresql"
+
+    def _cosine_distance(self, left: list[float], right: list[float]) -> float:
+        if not left or not right or len(left) != len(right):
+            return math.inf
+        dot = sum(a * b for a, b in zip(left, right))
+        left_norm = math.sqrt(sum(a * a for a in left))
+        right_norm = math.sqrt(sum(b * b for b in right))
+        if left_norm == 0 or right_norm == 0:
+            return math.inf
+        return 1 - (dot / (left_norm * right_norm))
+
+    def _as_vector(self, value: object) -> list[float]:
+        if value is None:
+            return []
+        return [float(item) for item in value]

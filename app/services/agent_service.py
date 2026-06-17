@@ -14,6 +14,7 @@ class AgentService:
         content: str,
         history: list[Message],
         activated_skills: list[Skill],
+        memory_context: list[str] | None = None,
     ) -> list[dict]:
         skill_blocks = "\n\n".join(
             f"<skill name=\"{skill.name}\">\n{skill.content}\n</skill>"
@@ -31,6 +32,9 @@ class AgentService:
             "3. shell_command 只用于 SKILL.md 明确要求的只读 curl 请求。\n"
             "4. 如果技能需要当前后端拿不到的输入，例如真实屏幕截图，先说明缺少什么，再给下一步。\n"
         )
+        if memory_context:
+            memory_items = "\n".join(f"- {item}" for item in memory_context)
+            system += f"\n长期记忆上下文：\n{memory_items}\n请在任务回复中自然参考这些记忆，不要生硬复述。\n"
         if skill_blocks:
             system += f"\n已激活技能：\n{skill_blocks}\n"
 

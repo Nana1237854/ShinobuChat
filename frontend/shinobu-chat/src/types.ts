@@ -64,9 +64,10 @@ export type ChatMessage = ApiMessage & {
 };
 
 export type StreamEvent =
-  | { type: 'conversation'; conversationId: string; title: string; userMessage: MessageOut }
+  | { type: 'conversation'; conversationId: string; title: string; routeMode: RouteMode; userMessage: MessageOut }
   | { type: 'chunk'; delta: string }
-  | { type: 'done'; assistantMessage: MessageOut }
+  | { type: 'audio'; text: string; audio: string; emotion: string | null }
+  | { type: 'done'; assistantMessages: MessageOut[] }
   | { type: 'emotion'; emotion: string }
   | { type: 'progress'; skillName: string; message: string; percent: number }
   | { type: 'error'; code: string; hint: string };

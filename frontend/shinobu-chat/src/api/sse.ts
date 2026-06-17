@@ -27,11 +27,17 @@ export function parseRawSseEvent(rawEvent: string): RawSseEvent | null {
 
 export function normalizeStreamEvent(raw: RawSseEvent): StreamEvent | null {
   if (raw.eventName === 'conversation') {
-    const payload = raw.payload as { conversation_id: string; title: string; user_message: Extract<StreamEvent, { type: 'conversation' }>['userMessage'] };
+    const payload = raw.payload as {
+      conversation_id: string;
+      title: string;
+      route_mode: Extract<StreamEvent, { type: 'conversation' }>['routeMode'];
+      user_message: Extract<StreamEvent, { type: 'conversation' }>['userMessage'];
+    };
     return {
       type: 'conversation',
       conversationId: payload.conversation_id,
       title: payload.title,
+      routeMode: payload.route_mode,
       userMessage: payload.user_message,
     };
   }
@@ -43,6 +49,10 @@ export function normalizeStreamEvent(raw: RawSseEvent): StreamEvent | null {
     const payload = raw.payload as { emotion: string };
     return { type: 'emotion', emotion: payload.emotion };
   }
+  if (raw.eventName === 'audio') {
+    const payload = raw.payload as { text: string; audio: string; emotion: string | null };
+    return { type: 'audio', text: payload.text, audio: payload.audio, emotion: payload.emotion };
+  }
   if (raw.eventName === 'progress') {
     const payload = raw.payload as { skill_name: string; message: string; percent: number };
     return { type: 'progress', skillName: payload.skill_name, message: payload.message, percent: payload.percent };
@@ -52,8 +62,8 @@ export function normalizeStreamEvent(raw: RawSseEvent): StreamEvent | null {
     return { type: 'error', code: payload.code, hint: payload.hint };
   }
   if (raw.eventName === 'done') {
-    const payload = raw.payload as { assistant_message: Extract<StreamEvent, { type: 'done' }>['assistantMessage'] };
-    return { type: 'done', assistantMessage: payload.assistant_message };
+    const payload = raw.payload as { assistant_messages?: Extract<StreamEvent, { type: 'done' }>['assistantMessages']; assistant_message?: never };
+    return { type: 'done', assistantMessages: payload.assistant_messages ?? [] };
   }
   return null;
 }

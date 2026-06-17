@@ -1,189 +1,95 @@
-import hashlib
-import math
-import re
-from datetime import datetime
-from uuid import UUID
-
-from sqlalchemy import text
-from sqlalchemy.orm import Session
+from __future__ import annotations
 
 from app.core.config import settings
-from app.models.memory import Memory
-from app.schemas.memory import MemoryCategory, MemoryOut, MemorySearchHit
-
-
-def _format_vector(value: list[float]) -> str:
-    return "[" + ",".join(f"{item:.8f}" for item in value) + "]"
+from app.core.exceptions import ConfigurationError, UpstreamServiceError
+from app.services.http_client import HttpClientError, UrllibHttpClient
 
 
 class EmbeddingService:
-    def __init__(self, db: Session):
-        self.db = db
+    def __init__(self, http_client: UrllibHttpClient | None = None):
+        self.http_client = http_client or UrllibHttpClient()
+        self._local_vectorizer = None
 
     def embed(self, text: str) -> list[float]:
-        dimensions = settings.memory_embedding_dimensions
-        vector = [0.0] * dimensions
-        tokens = self._tokenize(text)
-
-        for token in tokens:
-            digest = hashlib.blake2b(token.encode("utf-8"), digest_size=16).digest()
-            index = int.from_bytes(digest[:4], "big") % dimensions
-            sign = 1.0 if digest[4] % 2 == 0 else -1.0
-            weight = 1.0 + (len(token) % 7) / 10.0
-            vector[index] += sign * weight
-
-        return self._normalize(vector)
-
-    def search(
-        self,
-        user_id: UUID,
-        query_embedding: list[float],
-        *,
-        category: MemoryCategory | None = None,
-        limit: int = 8,
-        min_similarity: float = 0.0,
-        include_archived: bool = False,
-    ) -> list[MemorySearchHit]:
-        if (
-            settings.memory_pgvector_enabled
-            and self.db.bind
-            and self.db.bind.dialect.name == "postgresql"
-        ):
-            return self._search_pgvector(
-                user_id,
-                query_embedding,
-                category=category,
-                limit=limit,
-                min_similarity=min_similarity,
-                include_archived=include_archived,
-            )
-        return self._search_in_python(
-            user_id,
-            query_embedding,
-            category=category,
-            limit=limit,
-            min_similarity=min_similarity,
-            include_archived=include_archived,
-        )
-
-    def _tokenize(self, text_value: str) -> list[str]:
-        normalized = text_value.lower()
-        tokens = re.findall(r"[a-z0-9_]+", normalized)
-        cjk_chars = re.findall(r"[\u4e00-\u9fff]", normalized)
-        tokens.extend(cjk_chars)
-        tokens.extend("".join(cjk_chars[index : index + 2]) for index in range(len(cjk_chars) - 1))
-        tokens.extend("".join(cjk_chars[index : index + 3]) for index in range(len(cjk_chars) - 2))
-        if not tokens:
-            tokens = [normalized.strip() or "empty"]
-        return tokens
-
-    def _normalize(self, vector: list[float]) -> list[float]:
-        norm = math.sqrt(sum(item * item for item in vector))
-        if norm == 0:
-            return vector
-        return [item / norm for item in vector]
-
-    def _search_pgvector(
-        self,
-        user_id: UUID,
-        query_embedding: list[float],
-        *,
-        category: MemoryCategory | None = None,
-        limit: int = 8,
-        min_similarity: float = 0.0,
-        include_archived: bool = False,
-    ) -> list[MemorySearchHit]:
-        filters = ["user_id = :user_id", "embedding IS NOT NULL"]
-        params: dict[str, object] = {
-            "user_id": user_id,
-            "query_embedding": _format_vector(query_embedding),
-            "limit": limit,
-        }
-        if category:
-            filters.append("category = :category")
-            params["category"] = category.value
-        if not include_archived:
-            filters.append("archived = false")
-
-        statement = text(
-            f"""
-            SELECT id, embedding <=> CAST(:query_embedding AS vector) AS distance
-            FROM memories
-            WHERE {" AND ".join(filters)}
-            ORDER BY embedding <=> CAST(:query_embedding AS vector)
-            LIMIT :limit
-            """
-        )
-        rows = self.db.execute(statement, params).all()
-        distances = {row.id: float(row.distance) for row in rows}
-        if not distances:
+        content = text.strip()
+        if not content:
             return []
 
-        memories = self.db.query(Memory).filter(Memory.id.in_(distances.keys())).all()
-        ordered = sorted(memories, key=lambda item: distances[item.id])
-        return [
-            self._hit(memory, distances[memory.id])
-            for memory in ordered
-            if self._similarity(distances[memory.id]) >= min_similarity
-        ]
+        # Only use remote if memory-specific embedding URL is configured
+        if settings.memory_embedding_base_url and settings.memory_embedding_api_key:
+            return self._embed_remote(
+                content, settings.memory_embedding_base_url, settings.memory_embedding_api_key
+            )
 
-    def _search_in_python(
-        self,
-        user_id: UUID,
-        query_embedding: list[float],
-        *,
-        category: MemoryCategory | None = None,
-        limit: int = 8,
-        min_similarity: float = 0.0,
-        include_archived: bool = False,
-    ) -> list[MemorySearchHit]:
-        query = self.db.query(Memory).filter(Memory.user_id == user_id)
-        if category:
-            query = query.filter(Memory.category == category.value)
-        if not include_archived:
-            query = query.filter(Memory.archived.is_(False))
+        return self._embed_local(content)
 
-        ranked: list[tuple[Memory, float]] = []
-        for memory in query.all():
-            embedding = self._coerce_embedding(memory.embedding)
-            if not embedding:
-                continue
-            distance = self._cosine_distance(query_embedding, embedding)
-            if self._similarity(distance) >= min_similarity:
-                ranked.append((memory, distance))
-        ranked.sort(key=lambda item: item[1])
-        return [self._hit(memory, distance) for memory, distance in ranked[:limit]]
+    def _embed_remote(self, content: str, base_url: str, api_key: str) -> list[float]:
+        body = {"model": settings.memory_embedding_model, "input": content}
+        try:
+            response_data = self.http_client.request_json(
+                f"{base_url.rstrip('/')}/embeddings",
+                method="POST",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                body=body,
+                timeout=settings.ai_request_timeout_seconds,
+            )
+        except HttpClientError as exc:
+            raise UpstreamServiceError(f"Embedding API request failed: {exc}") from exc
+        try:
+            embedding = response_data["data"][0]["embedding"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise UpstreamServiceError("Embedding API returned an invalid response") from exc
+        vector = [float(item) for item in embedding]
+        if len(vector) != settings.memory_embedding_dimensions:
+            raise UpstreamServiceError(
+                f"Embedding vector dimension mismatch: expected {settings.memory_embedding_dimensions}, "
+                f"got {len(vector)}"
+            )
+        return vector
 
-    def _hit(self, memory: Memory, distance: float) -> MemorySearchHit:
-        memory.last_accessed_at = datetime.utcnow()
-        self.db.add(memory)
-        self.db.commit()
-        self.db.refresh(memory)
-        return MemorySearchHit(
-            memory=MemoryOut.model_validate(memory),
-            similarity=self._similarity(distance),
-            distance=distance,
-        )
+    def _embed_local(self, content: str) -> list[float]:
+        if self._local_vectorizer is None:
+            self._local_vectorizer = _create_vectorizer()
+        vec = self._local_vectorizer([content])
+        return [float(v) for v in vec[0]]
 
-    def _coerce_embedding(self, value: object) -> list[float] | None:
-        if value is None:
-            return None
-        if isinstance(value, list):
-            return [float(item) for item in value]
-        if isinstance(value, str):
-            stripped = value.strip().strip("[]")
-            if not stripped:
-                return None
-            return [float(item) for item in stripped.split(",")]
-        return [float(item) for item in value]  # type: ignore[arg-type]
 
-    def _cosine_distance(self, left: list[float], right: list[float]) -> float:
-        dot = sum(a * b for a, b in zip(left, right))
-        left_norm = math.sqrt(sum(item * item for item in left))
-        right_norm = math.sqrt(sum(item * item for item in right))
-        if left_norm == 0 or right_norm == 0:
-            return 1.0
-        return 1.0 - (dot / (left_norm * right_norm))
+def _create_vectorizer():
+    """Create a lightweight sklearn TfidfVectorizer with character n-grams.
+    Returns a callable that maps text -> fixed-size float vectors."""
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    import numpy as np
 
-    def _similarity(self, distance: float) -> float:
-        return max(0.0, min(1.0, 1.0 - distance))
+    dims = settings.memory_embedding_dimensions
+    vectorizer = TfidfVectorizer(
+        analyzer="char_wb",
+        ngram_range=(2, 4),
+        max_features=dims,
+        dtype=np.float32,
+    )
+
+    # Fit on some Chinese + English seed texts so the vocabulary is non-empty
+    seed = [
+        "你好我是Shinobu你的AI伙伴",
+        "今天天气真好阳光明媚",
+        "帮我查一下纽约的天气",
+        "我喜欢抹茶和夜跑",
+        "用户偏好设置和记忆",
+        "the quick brown fox jumps over the lazy dog",
+        "machine learning natural language processing",
+        "hello world how are you doing today",
+    ]
+    vectorizer.fit(seed)
+
+    def encode(texts):
+        X = vectorizer.transform(texts)
+        # Normalize to unit vector
+        from sklearn.preprocessing import normalize
+        X = normalize(X, norm="l2")
+        # Pad/truncate to target dimensions
+        result = np.zeros((len(texts), dims), dtype=np.float32)
+        n_features = min(X.shape[1], dims)
+        result[:, :n_features] = X[:, :n_features].toarray() if hasattr(X, 'toarray') else X[:, :n_features]
+        return result.tolist()
+
+    return encode

@@ -4,7 +4,7 @@ import { mergePetSettings } from './assetManifest';
 const SETTINGS_KEY = 'shinobu-pet-settings';
 
 export const defaultPetSettings: PetSettings = {
-  modelId: 'hiyori_pro_en',
+  modelId: 'mao_pro_en',
   backgroundId: 'gradient-dusk',
   opacity: 1,
   reminderMode: 'toast',

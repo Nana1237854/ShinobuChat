@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass
 from typing import Iterator
 from urllib import error, request
@@ -24,6 +25,47 @@ class HttpStatusError(HttpClientError):
 
 class HttpTransportError(HttpClientError):
     pass
+
+
+def encode_multipart(fields: dict[str, str], files: dict[str, tuple[str, str, bytes]]) -> tuple[bytes, str]:
+    boundary = f"----ShinobuChat{uuid.uuid4().hex}"
+    chunks: list[bytes] = []
+    for name, value in fields.items():
+        chunks.extend([
+            f"--{boundary}\r\n".encode("utf-8"),
+            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"),
+            str(value).encode("utf-8"),
+            b"\r\n",
+        ])
+    for name, (filename, content_type, content) in files.items():
+        chunks.extend([
+            f"--{boundary}\r\n".encode("utf-8"),
+            f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'.encode("utf-8"),
+            f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"),
+            content,
+            b"\r\n",
+        ])
+    chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+    return b"".join(chunks), boundary
+
+
+def extract_text(data: object) -> str:
+    if isinstance(data, dict):
+        for key in ("text", "result", "transcript", "sentence"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+            if isinstance(value, (dict, list)):
+                text = extract_text(value)
+                if text:
+                    return text
+        for value in data.values():
+            text = extract_text(value)
+            if text:
+                return text
+    if isinstance(data, list):
+        return " ".join(filter(None, (extract_text(item) for item in data))).strip()
+    return ""
 
 
 class UrllibHttpClient:

@@ -20,8 +20,9 @@ import { ConversationList } from './chat/ConversationList';
 import { MessageList } from './chat/MessageList';
 import { Composer } from './chat/Composer';
 import { CharacterEditor } from './chat/CharacterEditor';
-import { completeAssistantMessage, mergeServerMessages } from './chat/messageState';
+import { mergeServerMessages } from './chat/messageState';
 import { Live2DStage } from './live2d/Live2DStage';
+import { LIP_SYNC_FFT_SIZE, LIP_SYNC_NOISE_FLOOR, LIP_SYNC_SCALE, LIP_SYNC_SMOOTHING, ANALYSER_SMOOTHING } from './live2d/lipSync';
 import { PetTaskbar } from './desktop-pet/PetTaskbar';
 import { PetSettingsPanel } from './desktop-pet/PetSettingsPanel';
 import { MusicPlayer } from './media/MusicPlayer';
@@ -99,9 +100,76 @@ export default function App() {
   const [activeEmotion, setActiveEmotion] = useState<string | null>(null);
   const [petFeedback, setPetFeedback] = useState<string | null>(null);
   const [galgameMode, setGalgameMode] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioUrlRef = useRef<string | null>(null);
-  const voiceReplyRequestedRef = useRef(false);
+  const [spokenLines, setSpokenLines] = useState<string[]>([]);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const audioNextRef = useRef(0);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const lipSyncRef = useRef<((v: number) => void) | null>(null);
+  const setLipSyncRef = (fn: (v: number) => void) => { lipSyncRef.current = fn; };
+  const mouthRef = useRef(0);
+  const lipRafRef = useRef(0);
+  const audioEndTimeRef = useRef(0);
+
+
+  const ensureLipSyncRunning = () => {
+    if (lipRafRef.current) return;
+    const tick = () => {
+      const a = analyserRef.current;
+      const fn = lipSyncRef.current;
+      const hasAudio = audioEndTimeRef.current > (audioCtxRef.current?.currentTime || 0);
+      if (a && fn && hasAudio) {
+        const buf = new Uint8Array(a.fftSize);
+        a.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = (buf[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / buf.length);
+        const scaled = Math.max(0, Math.min((rms - LIP_SYNC_NOISE_FLOOR) * LIP_SYNC_SCALE, 1));
+        mouthRef.current += LIP_SYNC_SMOOTHING * (scaled - mouthRef.current);
+        fn(mouthRef.current);
+      } else {
+        mouthRef.current *= 0.6;
+        if (fn) fn(mouthRef.current);
+        if (mouthRef.current < 0.01 && !hasAudio) {
+          mouthRef.current = 0;
+          if (fn) fn(0);
+          lipRafRef.current = 0;
+          return;
+        }
+      }
+      lipRafRef.current = requestAnimationFrame(tick);
+    };
+    lipRafRef.current = requestAnimationFrame(tick);
+  };
+
+  function playBase64Audio(b64: string) {
+    const ac = audioCtxRef.current || (audioCtxRef.current = new AudioContext());
+    if (!analyserRef.current) {
+      analyserRef.current = ac.createAnalyser();
+      analyserRef.current.fftSize = LIP_SYNC_FFT_SIZE;
+      analyserRef.current.smoothingTimeConstant = ANALYSER_SMOOTHING;
+      analyserRef.current.connect(ac.destination);
+    }
+    try {
+      const binary = atob(b64);
+      const buf = new ArrayBuffer(binary.length);
+      const view = new Uint8Array(buf);
+      for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i);
+      ac.decodeAudioData(buf, (decoded) => {
+        const now = ac.currentTime;
+        const start = Math.max(now, audioNextRef.current);
+        audioNextRef.current = start + decoded.duration;
+        audioEndTimeRef.current = Math.max(audioEndTimeRef.current, audioNextRef.current);
+        const source = ac.createBufferSource();
+        source.buffer = decoded;
+        source.connect(analyserRef.current!);
+        source.start(start);
+        ensureLipSyncRunning();
+      }, () => {});
+    } catch (_) {}
+  }
 
   const reloadAssets = useCallback(async () => {
     const [nextModels, nextBackgrounds, nextTracks] = await Promise.all([
@@ -165,8 +233,8 @@ export default function App() {
   }, [routeMode]);
 
   useEffect(() => () => {
-    audioRef.current?.pause();
-    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+    if (lipRafRef.current) cancelAnimationFrame(lipRafRef.current);
+    if (audioCtxRef.current) audioCtxRef.current.close().catch(() => {});
   }, []);
 
   const refreshConversations = useCallback(async () => {
@@ -247,33 +315,6 @@ export default function App() {
     }
   };
 
-  const playAssistantVoice = useCallback(async (message: ApiMessage) => {
-    if (!message.content.trim()) return;
-    try {
-      setStatus('Synthesizing voice...');
-      const speech = await synthesizeSpeech({
-        text: message.content,
-        emotion: message.emotion,
-        context: messages.slice(-6).map(item => item.content),
-      });
-      if (speech.emotion) setActiveEmotion(speech.emotion);
-
-      audioRef.current?.pause();
-      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
-      const url = URL.createObjectURL(speech.audio);
-      audioUrlRef.current = url;
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.onplay = () => setStatus('Speaking...');
-      audio.onended = () => setStatus('Ready');
-      audio.onerror = () => setStatus('Voice playback failed');
-      await audio.play();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Voice synthesis failed');
-      setStatus('Voice synthesis failed');
-    }
-  }, [messages]);
-
   const sendText = async (text: string) => {
     if (!session || streaming) return;
     const content = text.trim();
@@ -284,6 +325,7 @@ export default function App() {
 
     let pendingId = `pending-${Date.now()}`;
     let streamConversationId = conversationId;
+    let actualRouteMode = routeMode;
     try {
       await sendMessageStream({
         userId: session.userId,
@@ -293,6 +335,7 @@ export default function App() {
         onEvent: event => {
           if (event.type === 'conversation') {
             streamConversationId = event.conversationId;
+            actualRouteMode = event.routeMode;
             setConversationId(event.conversationId);
             localStorage.setItem('shinobu-conversation-id', event.conversationId);
             setMessages(current => {
@@ -315,7 +358,7 @@ export default function App() {
                   conversation_id: streamConversationId || 'pending',
                   role: 'assistant',
                   content: event.delta,
-                  route_mode: routeMode,
+                  route_mode: actualRouteMode,
                   created_at: new Date().toISOString(),
                   status: 'streaming',
                   local: true,
@@ -333,12 +376,30 @@ export default function App() {
             setError(event.hint);
             setStatus('Action failed');
           }
+          if (event.type === 'audio') {
+            const segId = "seg-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
+            setMessages(current => [
+              ...current,
+              {
+                id: segId, conversation_id: streamConversationId || 'pending',
+                role: 'assistant' as const, content: event.text,
+                route_mode: actualRouteMode, created_at: new Date().toISOString(),
+                status: 'streaming' as const, local: true,
+              },
+            ]);
+            playBase64Audio(event.audio);
+            if (event.emotion) setActiveEmotion(event.emotion);
+            setSpokenLines(prev => [...prev, event.text]);
+            setStatus(event.text);
+          }
           if (event.type === 'done') {
-            setMessages(current => completeAssistantMessage(current, pendingId, toChatMessage(event.assistantMessage)));
-            updateAvatarEmotion(event.assistantMessage);
-            if (voiceReplyRequestedRef.current) {
-              voiceReplyRequestedRef.current = false;
-              void playAssistantVoice(event.assistantMessage);
+            setMessages(current => {
+              const serverMessages = event.assistantMessages.map(toChatMessage);
+              const nonLocal = current.filter(item => !item.local);
+              return [...nonLocal, ...serverMessages];
+            });
+            if (event.assistantMessages && event.assistantMessages.length > 0) {
+              updateAvatarEmotion(event.assistantMessages[event.assistantMessages.length - 1]);
             }
             refreshConversations();
           }
@@ -352,7 +413,6 @@ export default function App() {
       setStatus('Send failed');
       setMessages(current => current.map(item => item.id === pendingId ? { ...item, status: 'failed' } : item));
     } finally {
-      pendingId = '';
       setStreaming(false);
     }
   };
@@ -363,10 +423,8 @@ export default function App() {
       setError(null);
       setStatus('Transcribing voice...');
       const transcript = await transcribeSpeech(audio);
-      voiceReplyRequestedRef.current = true;
       await sendText(transcript.text);
     } catch (nextError) {
-      voiceReplyRequestedRef.current = false;
       setError(nextError instanceof Error ? nextError.message : 'Voice recognition failed');
       setStatus('Voice recognition failed');
     }
@@ -503,6 +561,7 @@ export default function App() {
           activeTool={activeTool}
           onSettingsChange={setPetSettings}
           onInteract={handlePetInteraction}
+          onLipSyncReady={setLipSyncRef}
         />
         <PetTaskbar
           activeTool={activeTool}
@@ -526,6 +585,13 @@ export default function App() {
             />
             <CharacterEditor userId={session.userId} />
           </>
+        ) : null}
+        {spokenLines.length > 0 ? (
+          <div className="spoken-subtitle">
+            {spokenLines.map((line, i) => (
+              <p key={i} className={i === spokenLines.length - 1 ? 'is-active' : ''}>{line}</p>
+            ))}
+          </div>
         ) : null}
         {petFeedback ? <div className="pet-feedback">{petFeedback}</div> : null}
         <MusicPlayer tracks={tracks} />

@@ -1,30 +1,29 @@
 from functools import lru_cache
+from pathlib import Path
 
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.services.agent_orchestrator import AgentOrchestrator
+from app.services.agent_service import AgentService
+from app.services.agents import AgentCoordinator, ChatAgent, MemoryAgent, RouterAgent, TaskAgent
+from app.services.ai_client import AIClient
 from app.services.auth_service import AuthService
-from app.services.character_service import CharacterService
-from app.services.chat_service import ChatService
-from app.services.conversation_compactor import ConversationCompactor
-from app.services.decision_service import DecisionService
+from app.services.conversation_service import ConversationService
+from app.services.device_registry_service import DeviceRegistryService
+from app.services.embedding_service import EmbeddingService
 from app.services.http_client import UrllibHttpClient
 from app.services.live2d_service import Live2DService
 from app.services.memory_service import MemoryService
 from app.services.message_service import MessageService
-from app.services.roleplay_service import RoleplayService
-from app.services.skill_service import SkillService
-from app.services.sync_service import SyncService
-from app.services.todo_service import TodoService
+from app.services.skill_service import SkillRegistry
+from app.services.stream_events import SseEncoder
+from app.services.tool_registry import ToolRegistry
+from app.services.asr_service import ASRConfig
+from app.services.tts_service import TTSConfig
 from app.services.voice_service import VoiceService
-
-
-_character_service: CharacterService | None = None
-_decision_service: DecisionService | None = None
-_roleplay_service: RoleplayService | None = None
-_skill_service: SkillService | None = None
 
 
 @lru_cache
@@ -33,8 +32,81 @@ def get_http_client() -> UrllibHttpClient:
 
 
 @lru_cache
+def get_skill_registry() -> SkillRegistry:
+    return SkillRegistry(Path(__file__).resolve().parents[2] / "skills")
+
+
+@lru_cache
+def get_ai_client() -> AIClient:
+    return AIClient(get_http_client())
+
+
+@lru_cache
+def get_agent_service() -> AgentService:
+    return AgentService(get_skill_registry())
+
+
+@lru_cache
+def get_tool_registry() -> ToolRegistry:
+    return ToolRegistry(get_skill_registry(), get_http_client())
+
+
+@lru_cache
+def get_agent_orchestrator() -> AgentOrchestrator:
+    return AgentOrchestrator(get_agent_service(), get_tool_registry(), get_ai_client())
+
+
+@lru_cache
+def get_embedding_service() -> EmbeddingService:
+    return EmbeddingService(get_http_client())
+
+
+@lru_cache
+def get_memory_service() -> MemoryService:
+    return MemoryService(get_embedding_service(), get_ai_client())
+
+
+@lru_cache
+def get_memory_agent() -> MemoryAgent:
+    return MemoryAgent(get_memory_service())
+
+
+@lru_cache
+def get_agent_coordinator() -> AgentCoordinator:
+    return AgentCoordinator(
+        RouterAgent(),
+        ChatAgent(),
+        TaskAgent(get_skill_registry(), get_agent_service(), get_agent_orchestrator()),
+        get_memory_agent(),
+    )
+
+
+@lru_cache
+def get_sse_encoder() -> SseEncoder:
+    return SseEncoder()
+
+
+@lru_cache
 def get_voice_service() -> VoiceService:
-    return VoiceService(get_http_client())
+    return VoiceService(
+        TTSConfig(
+            voice=settings.edge_tts_voice,
+            rate=settings.edge_tts_rate,
+            volume=settings.edge_tts_volume,
+        ),
+        ASRConfig(
+            engine=settings.asr_engine,
+            timeout_seconds=settings.asr_timeout_seconds,
+            funasr_api_url=settings.funasr_api_url,
+            whisper_api_url=settings.whisper_api_url,
+            whisper_api_key=settings.whisper_api_key,
+            whisper_fallback_api_key=settings.ai_api_key,
+            whisper_base_url=settings.ai_base_url,
+            whisper_model=settings.whisper_model,
+            whisper_language=settings.whisper_language,
+        ),
+        get_http_client(),
+    )
 
 
 @lru_cache
@@ -46,65 +118,23 @@ def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
     return AuthService(db)
 
 
-def get_memory_service(db: Session = Depends(get_db)) -> MemoryService:
-    return MemoryService(db, SyncService(db))
+def get_device_registry_service(db: Session = Depends(get_db)) -> DeviceRegistryService:
+    return DeviceRegistryService(db)
 
 
-def get_todo_service(db: Session = Depends(get_db)) -> TodoService:
-    return TodoService(db, SyncService(db))
-
-
-def get_agent_orchestrator(
-    db: Session = Depends(get_db),
-    memory_service: MemoryService = Depends(get_memory_service),
-    todo_service: TodoService = Depends(get_todo_service),
-) -> AgentOrchestrator:
-    return AgentOrchestrator(db, memory_service, todo_service)
-
-
-def get_compactor() -> ConversationCompactor:
-    return ConversationCompactor(max_messages=30, keep_recent=15)
-
-
-def get_chat_service(
-    db: Session = Depends(get_db),
-    agent: AgentOrchestrator = Depends(get_agent_orchestrator),
-    compactor: ConversationCompactor = Depends(get_compactor),
-) -> ChatService:
-    return ChatService(db, SyncService(db), agent, compactor)
+def get_conversation_service(db: Session = Depends(get_db)) -> ConversationService:
+    return ConversationService(db)
 
 
 def get_message_service(db: Session = Depends(get_db)) -> MessageService:
-    return MessageService(db)
-
-
-def get_sync_service(db: Session = Depends(get_db)) -> SyncService:
-    return SyncService(db)
-
-
-def get_character_service() -> CharacterService:
-    global _character_service
-    if _character_service is None:
-        _character_service = CharacterService()
-    return _character_service
-
-
-def get_decision_service() -> DecisionService:
-    global _decision_service
-    if _decision_service is None:
-        _decision_service = DecisionService()
-    return _decision_service
-
-
-def get_roleplay_service() -> RoleplayService:
-    global _roleplay_service
-    if _roleplay_service is None:
-        _roleplay_service = RoleplayService()
-    return _roleplay_service
-
-
-def get_skill_service() -> SkillService:
-    global _skill_service
-    if _skill_service is None:
-        _skill_service = SkillService()
-    return _skill_service
+    return MessageService(
+        db,
+        get_skill_registry(),
+        get_agent_service(),
+        get_agent_orchestrator(),
+        get_ai_client(),
+        get_sse_encoder(),
+        get_voice_service(),
+        get_agent_coordinator(),
+        get_memory_agent(),
+    )

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AvatarTool, Live2DModelItem, PetSettings } from '../types';
 import { clamp } from './settings';
+import { LIP_SYNC_IDS } from './lipSync';
 
 type Live2DStageProps = {
   model?: Live2DModelItem;
@@ -9,6 +10,7 @@ type Live2DStageProps = {
   activeTool: AvatarTool | null;
   onSettingsChange: (settings: PetSettings) => void;
   onInteract: () => void;
+  onLipSyncReady?: (setter: (value: number) => void) => void;
 };
 
 type LoadedRuntime = {
@@ -26,6 +28,11 @@ type LoadedRuntime = {
     expression?: (id?: number | string) => Promise<boolean>;
     motion?: (group: string, index?: number) => Promise<boolean>;
     alpha?: number;
+    internalModel?: {
+      coreModel?: {
+        setParameterValueById?: (id: string, value: number) => void;
+      };
+    };
   };
 };
 
@@ -129,13 +136,17 @@ export function Live2DStage({
   activeTool,
   onSettingsChange,
   onInteract,
+  onLipSyncReady,
 }: Live2DStageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<LoadedRuntime | null>(null);
   const emotionRef = useRef<string | null | undefined>(activeEmotion);
+  const onLipSyncReadyRef = useRef(onLipSyncReady);
+  onLipSyncReadyRef.current = onLipSyncReady;
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const prevEntryRef = useRef<string | undefined>();
 
   useEffect(() => {
     const container = containerRef.current;
@@ -144,7 +155,12 @@ export function Live2DStage({
       return;
     }
 
+    // Guard: skip if entry hasn't changed (prevents React StrictMode / HMR re-triggers)
+    if (prevEntryRef.current === model.entry) return;
+    prevEntryRef.current = model.entry;
+
     let cancelled = false;
+    console.log('[Live2D] CREATING model:', model.id, 'entry:', model.entry);
     setLoading(true);
     setError(null);
     runtimeRef.current?.app.destroy(true, { children: true, texture: true, baseTexture: true });
@@ -159,6 +175,21 @@ export function Live2DStage({
         }
         runtimeRef.current = runtime;
         applyLive2DEmotion(runtime, model, emotionRef.current);
+        const core = runtime.modelObject?.internalModel?.coreModel;
+        if (onLipSyncReadyRef.current && core?.setParameterValueById) {
+          for (const id of LIP_SYNC_IDS) {
+            try {
+              core.setParameterValueById(id, 0);
+            } catch (_) {}
+          }
+          onLipSyncReadyRef.current?.((value: number) => {
+            for (const id of LIP_SYNC_IDS) {
+              try {
+                core.setParameterValueById?.(id, value);
+              } catch (_) {}
+            }
+          });
+        }
       })
       .catch(nextError => {
         if (!cancelled) {
@@ -175,6 +206,7 @@ export function Live2DStage({
       runtimeRef.current = null;
       container.replaceChildren();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model?.entry]);
 
   useEffect(() => {

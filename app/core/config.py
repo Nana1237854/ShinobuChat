@@ -68,6 +68,13 @@ class Settings(BaseSettings):
 
     agent_max_steps: int = Field(default=50)
 
+    memory_pgvector_enabled: bool = Field(default=False)
+    memory_max_results: int = Field(default=3)
+    memory_embedding_base_url: str = Field(default="")
+    memory_embedding_api_key: str = Field(default="")
+    memory_embedding_model: str = Field(default="text-embedding-3-small")
+    memory_embedding_dimensions: int = Field(default=768)
+
     image_max_input_bytes: int = Field(default=41_943_040)
     image_max_output_bytes: int = Field(default=4_194_304)
     image_max_side: int = Field(default=3072)
@@ -75,19 +82,9 @@ class Settings(BaseSettings):
 
     file_max_input_bytes: int = Field(default=209_715_200)
 
-    gpt_sovits_base_url: str = Field(default="http://127.0.0.1:9880")
-    gpt_sovits_timeout_seconds: int = Field(default=120)
-    gpt_sovits_text_lang: str = Field(default="zh")
-    gpt_sovits_prompt_lang: str = Field(default="zh")
-    gpt_sovits_media_type: str = Field(default="wav")
-    gpt_sovits_text_split_method: str = Field(default="cut5")
-    gpt_sovits_batch_size: int = Field(default=1)
-    gpt_sovits_streaming_mode: bool = Field(default=False)
-
-    voice_reference_manifest_path: Path = (
-        Path(__file__).resolve().parents[2] / "voice_reference_audio.json"
-    )
-    voice_reference_presets: str = Field(default="")
+    edge_tts_voice: str = Field(default="zh-CN-XiaoxiaoNeural")
+    edge_tts_rate: str = Field(default="+0%")
+    edge_tts_volume: str = Field(default="+0%")
 
     asr_engine: str = Field(default="whisper")
     asr_timeout_seconds: int = Field(default=90)

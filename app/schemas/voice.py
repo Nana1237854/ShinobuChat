@@ -13,10 +13,3 @@ class VoiceASRResponse(BaseModel):
     text: str
     engine: str
 
-
-class VoiceReferencePresetOut(BaseModel):
-    emotion: str
-    prompt_text: str = ""
-    prompt_lang: str
-    text_lang: str
-    has_ref_audio: bool
