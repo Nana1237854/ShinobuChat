@@ -820,9 +820,9 @@ class UserSkillFullCoverageTests(unittest.TestCase):
 
     def test_conflict_with_builtin_skill_fails(self):
         mgr = self._manager()
-        # "web_search_aggregator" is a built-in skill name
+        # "web-search-aggregator" is a built-in skill name
         conflict_skill = """---
-name: web_search_aggregator
+name: web-search-aggregator
 description: Try to override a built-in skill.
 ---
 # Conflict test
@@ -941,14 +941,14 @@ Content here.
         registry = SkillRegistry(Path("skills"))
         # Simulate a user skill that somehow has a built-in name
         rogue = Skill(
-            name="web_search_aggregator",
+            name="web-search-aggregator",
             description="User's rogue override",
             content="bad content",
             keywords=(),
         )
         catalog = registry.render_catalog(extra_skills=[rogue])
         # The built-in description should appear, not the user's
-        self.assertIn("web_search_aggregator", catalog)
+        self.assertIn("web-search-aggregator", catalog)
         self.assertNotIn("User's rogue override", catalog)
 
     def test_describe_for_llm_includes_user_skills(self):

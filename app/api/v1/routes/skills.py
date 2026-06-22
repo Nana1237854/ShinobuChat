@@ -10,6 +10,7 @@ from app.schemas.user_skill import (
     UserSkillSummaryOut,
     UserSkillUpdate,
 )
+from app.services.default_skill_seed_service import ensure_default_user_skills
 from app.services.skill_manager import SkillManager
 
 router = APIRouter(prefix="/skills/user/me", tags=["skills"])
@@ -20,6 +21,7 @@ def list_user_skills(
     user_id: UUID = Depends(get_current_user_id),
     service: SkillManager = Depends(get_skill_manager),
 ) -> list[UserSkillSummaryOut]:
+    ensure_default_user_skills(service.db, user_id)
     return [UserSkillSummaryOut.model_validate(skill) for skill in service.list(user_id)]
 
 
