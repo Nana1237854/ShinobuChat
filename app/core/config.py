@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     )
 
     jwt_secret_key: str = Field(default="replace-me-in-prod")
+    config_encryption_key: str = Field(default="")
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60
 

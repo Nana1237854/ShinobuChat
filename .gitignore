@@ -1,14 +1,28 @@
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 .env
 .env.*
+!.env.example
 
 node_modules/
 dist/
+build/
 *.tsbuildinfo
 frontend/*/vite.config.js
 frontend/*/vite.config.d.ts
+*.vite-dev.log
+*.vite-dev.err.log
+vite-dev.log
+vite-dev.err.log
+
+# Regenerated reports, converted documents, and chart intermediates.
+output/
 
 .DS_Store
 Thumbs.db

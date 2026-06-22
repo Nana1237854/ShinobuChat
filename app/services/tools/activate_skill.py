@@ -6,7 +6,7 @@ from app.services.tool_registry import Tool, ToolContext
 def create_tool(registry) -> Tool:
     def handler(arguments: dict, context: ToolContext) -> str:
         skill_name = str(arguments.get("name", ""))
-        skill = registry.skill_registry.get(skill_name)
+        skill = context.user_skills.get(skill_name) or registry.skill_registry.get(skill_name)
         if not skill:
             return json.dumps({"error": f"Skill not found: {skill_name}"}, ensure_ascii=False)
         return skill.content

@@ -33,6 +33,7 @@ def create_tool(registry) -> Tool:
         except OSError as exc:
             return f"Command failed to start: {exc}"
 
+        context.metadata["exit_code"] = completed.returncode
         output = (completed.stdout or completed.stderr or "").strip()
         return output[:12000] or f"Command exited with code {completed.returncode} and no output."
 

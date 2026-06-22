@@ -5,4 +5,13 @@ from app.models.memory import Memory
 from app.models.message import Message
 from app.models.user import User
 
-__all__ = ["Base", "User", "Device", "Conversation", "Message", "Memory"]
+__all__ = [
+    "Base",
+    "User",
+    "UserConfig",
+    "UserSkill",
+    "Device",
+    "Conversation",
+    "Message",
+    "Memory",
+]

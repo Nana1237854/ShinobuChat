@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Any, Iterator
 
 from app.models.message import Message
 from app.schemas.message import RouteMode
@@ -10,6 +10,7 @@ from app.services.agents.chat_agent import ChatAgent
 from app.services.agents.memory_agent import MemoryAgent
 from app.services.agents.router_agent import RouterAgent, RouterDecision
 from app.services.agents.task_agent import TaskAgent
+from app.services.skill_service import Skill
 from app.services.stream_events import StreamEvent
 
 
@@ -42,6 +43,7 @@ class AgentCoordinator:
         user_id: uuid.UUID,
         content: str,
         history: list[Message],
+        user_skills: list[Skill] | None = None,
     ) -> AgentPlan:
         decision = self.resolve_route(requested_route_mode, content, history)
         memory_context = self.memory_agent.search(user_id, content)
@@ -49,7 +51,17 @@ class AgentCoordinator:
             messages = self.chat_agent.build_messages(content, history, memory_context)
             progress_events: list[StreamEvent] = []
         else:
-            messages, progress_events = self.task_agent.build_messages(content, history, memory_context)
+            if user_skills:
+                messages, progress_events = self.task_agent.build_messages(
+                    content,
+                    history,
+                    memory_context,
+                    user_skills=user_skills,
+                )
+            else:
+                messages, progress_events = self.task_agent.build_messages(
+                    content, history, memory_context
+                )
         return AgentPlan(
             route_mode=decision.target,
             router_decision=decision,
@@ -73,8 +85,20 @@ class AgentCoordinator:
             return continuation
         return self.router_agent.route(content)
 
-    def run_task(self, messages: list[dict], history: list[Message]) -> Iterator[StreamEvent | str]:
-        yield from self.task_agent.run(messages, history)
+    def run_task(
+        self,
+        messages: list[dict],
+        history: list[Message],
+        *,
+        user_skills: list[Skill] | None = None,
+        ai_config: dict[str, Any] | None = None,
+    ) -> Iterator[StreamEvent | str]:
+        yield from self.task_agent.run(
+            messages,
+            history,
+            user_skills=user_skills,
+            ai_config=ai_config,
+        )
 
     def _detect_agent_continuation(self, content: str, history: list[Message]) -> RouterDecision | None:
         text = content.strip()

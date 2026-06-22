@@ -1,7 +1,10 @@
 from functools import lru_cache
 from pathlib import Path
+from uuid import UUID
 
 from fastapi import Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -11,6 +14,10 @@ from app.services.agent_service import AgentService
 from app.services.agents import AgentCoordinator, ChatAgent, MemoryAgent, RouterAgent, TaskAgent
 from app.services.ai_client import AIClient
 from app.services.auth_service import AuthService
+from app.services.chat_service import ChatService
+from app.services.character_service import CharacterService
+from app.services.conversation_compactor import ConversationCompactor
+from app.services.config_service import ConfigService
 from app.services.conversation_service import ConversationService
 from app.services.device_registry_service import DeviceRegistryService
 from app.services.embedding_service import EmbeddingService
@@ -18,12 +25,17 @@ from app.services.http_client import UrllibHttpClient
 from app.services.live2d_service import Live2DService
 from app.services.memory_service import MemoryService
 from app.services.message_service import MessageService
+from app.services.skill_manager import SkillManager
 from app.services.skill_service import SkillRegistry
 from app.services.stream_events import SseEncoder
+from app.services.sync_service import SyncService
+from app.services.todo_service import TodoService
 from app.services.tool_registry import ToolRegistry
 from app.services.asr_service import ASRConfig
 from app.services.tts_service import TTSConfig
 from app.services.voice_service import VoiceService
+
+_bearer = HTTPBearer(auto_error=False)
 
 
 @lru_cache
@@ -78,6 +90,8 @@ def get_agent_coordinator() -> AgentCoordinator:
         ChatAgent(),
         TaskAgent(get_skill_registry(), get_agent_service(), get_agent_orchestrator()),
         get_memory_agent(),
+        ConfigService(db),
+        SkillManager(db),
     )
 
 
@@ -114,6 +128,38 @@ def get_live2d_service() -> Live2DService:
     return Live2DService()
 
 
+
+def get_current_user_id(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> UUID:
+    if credentials is None:
+        from app.core.exceptions import UnauthorizedError
+
+        raise UnauthorizedError("Authentication required")
+    try:
+        payload = jwt.decode(
+            credentials.credentials,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        user_id = UUID(str(payload.get("sub") or ""))
+    except (JWTError, ValueError, TypeError) as exc:
+        from app.core.exceptions import UnauthorizedError
+
+        raise UnauthorizedError("Invalid access token") from exc
+    AuthService(db).get_user_by_id(user_id)
+    return user_id
+
+
+def get_config_service(db: Session = Depends(get_db)) -> ConfigService:
+    return ConfigService(db)
+
+
+def get_skill_manager(db: Session = Depends(get_db)) -> SkillManager:
+    return SkillManager(db)
+
+
 def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
     return AuthService(db)
 
@@ -122,8 +168,29 @@ def get_device_registry_service(db: Session = Depends(get_db)) -> DeviceRegistry
     return DeviceRegistryService(db)
 
 
+def get_character_service() -> CharacterService:
+    return CharacterService()
+
+
+def get_sync_service(db: Session = Depends(get_db)) -> SyncService:
+    return SyncService(db)
+
+
+def get_todo_service(db: Session = Depends(get_db)) -> TodoService:
+    return TodoService(db, SyncService(db))
+
+
 def get_conversation_service(db: Session = Depends(get_db)) -> ConversationService:
     return ConversationService(db)
+
+
+def get_chat_service(db: Session = Depends(get_db)) -> ChatService:
+    return ChatService(
+        db,
+        SyncService(db),
+        get_agent_orchestrator(),
+        ConversationCompactor(),
+    )
 
 
 def get_message_service(db: Session = Depends(get_db)) -> MessageService:
@@ -137,4 +204,6 @@ def get_message_service(db: Session = Depends(get_db)) -> MessageService:
         get_voice_service(),
         get_agent_coordinator(),
         get_memory_agent(),
+        ConfigService(db),
+        SkillManager(db),
     )

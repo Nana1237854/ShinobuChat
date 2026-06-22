@@ -2,6 +2,8 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 from app.core.config import settings
 from app.events.bus import bus
 from app.events.types import EventType
@@ -15,6 +17,7 @@ from app.skills.registry import SkillRegistry as AppSkillRegistry
 @dataclass(frozen=True)
 class Skill:
     name: str
+    description: str
     content: str
     keywords: tuple[str, ...] = ()
 
@@ -29,6 +32,9 @@ class SkillRegistry:
     def get(self, name: str) -> Skill | None:
         return self._skills.get(name)
 
+    def all(self) -> list[Skill]:
+        return list(self._skills.values())
+
     def match(self, content: str) -> list[Skill]:
         normalized = content.lower()
         matches: list[Skill] = []
@@ -37,8 +43,14 @@ class SkillRegistry:
                 matches.append(skill)
         return matches
 
-    def render_catalog(self) -> str:
-        return "\n".join(f"- {skill.name}: {', '.join(skill.keywords) or 'general'}" for skill in self._skills.values())
+    def render_catalog(self, extra_skills: list[Skill] | None = None) -> str:
+        merged = {skill.name: skill for skill in self._skills.values()}
+        for skill in extra_skills or []:
+            merged[skill.name] = skill
+        return "\n".join(
+            f"- {skill.name}: {skill.description}"
+            for skill in sorted(merged.values(), key=lambda item: item.name)
+        )
 
     def _load(self) -> dict[str, Skill]:
         skills: dict[str, Skill] = {}
@@ -46,16 +58,38 @@ class SkillRegistry:
             return skills
 
         for skill_file in sorted(self.root.glob("*/SKILL.md")):
-            name = skill_file.parent.name
             try:
                 content = skill_file.read_text(encoding="utf-8")
-            except OSError:
+                metadata = self._frontmatter(content)
+            except (OSError, ValueError, yaml.YAMLError):
                 continue
-            skills[name] = Skill(name=name, content=content, keywords=self._keywords(name, content))
+            name = str(metadata.get("name") or "").strip()
+            description = str(metadata.get("description") or "").strip()
+            if not name or not description:
+                continue
+            keywords = self._keywords(name, content, metadata.get("keywords"))
+            skills[name] = Skill(
+                name=name,
+                description=description,
+                content=content,
+                keywords=keywords,
+            )
         return skills
 
-    def _keywords(self, name: str, content: str) -> tuple[str, ...]:
+    def _frontmatter(self, content: str) -> dict:
+        normalized = content.replace("\r\n", "\n")
+        if not normalized.startswith("---\n"):
+            raise ValueError("SKILL.md frontmatter is required")
+        _, frontmatter, _ = normalized.split("---", 2)
+        metadata = yaml.safe_load(frontmatter) or {}
+        if not isinstance(metadata, dict):
+            raise ValueError("SKILL.md frontmatter must be a mapping")
+        return metadata
+
+    def _keywords(self, name: str, content: str, declared: object = None) -> tuple[str, ...]:
         base = {name.replace("_", " "), name.replace("_", "-"), name}
+        if isinstance(declared, list):
+            base.update(str(item).strip().lower() for item in declared if str(item).strip())
         lowered = content.lower()
         hints = {
             "weather": ("weather", "forecast", "天气", "预报"),

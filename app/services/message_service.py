@@ -15,9 +15,11 @@ from app.services.agent_orchestrator import AgentOrchestrator
 from app.services.agent_service import AgentService
 from app.services.agents import AgentCoordinator, MemoryAgent
 from app.services.ai_client import AIClient
+from app.services.config_service import ConfigService
 from app.services.conversation_service import ConversationService
 from app.services.emotion_parser import parse_emotion_tag, resolve_emotion
 from app.services.sentence_splitter import split_long_sentence, split_sentences
+from app.services.skill_manager import SkillManager
 from app.services.skill_service import SkillRegistry
 from app.services.stream_events import SseEncoder, StreamEvent
 from app.services.text_cleaner import clean_tts_text
@@ -47,6 +49,8 @@ class MessageService:
         voice_service: VoiceService | None = None,
         agent_coordinator: AgentCoordinator | None = None,
         memory_agent: MemoryAgent | None = None,
+        config_service: ConfigService | None = None,
+        skill_manager: SkillManager | None = None,
     ):
         self.db = db
         self.conversations = ConversationService(db)
@@ -58,10 +62,21 @@ class MessageService:
         self.voice_service = voice_service
         self.agent_coordinator = agent_coordinator
         self.memory_agent = memory_agent
+        self.config_service = config_service
+        self.skill_manager = skill_manager
 
     async def create_streaming_response(self, payload: MessageCreate):
         state, messages = await asyncio.to_thread(self.prepare_stream, payload)
-        max_tokens = settings.ai_lightweight_max_tokens
+        ai_config = (
+            self.config_service.resolve_runtime(payload.user_id)
+            if self.config_service is not None
+            else None
+        )
+        max_tokens = int(
+            (ai_config or {}).get(
+                "ai_lightweight_max_tokens", settings.ai_lightweight_max_tokens
+            )
+        )
 
         yield self._format_event(StreamEvent("conversation", {
             "conversation_id": str(state.conversation.id),
@@ -76,12 +91,16 @@ class MessageService:
 
         full_reply = ""
         if state.route_mode is RouteMode.CHAT:
-            for chunk in self.ai_client.stream_chat(messages, max_tokens=max_tokens):
+            for chunk in self.ai_client.stream_chat(
+                messages, max_tokens=max_tokens, runtime_config=ai_config
+            ):
                 full_reply += chunk
         else:
             for event in state.progress_events:
                 yield self._format_event(event)
-            for item in self._run_task_agent(messages, history[:-1]):
+            for item in self._run_task_agent(
+                messages, history[:-1], payload.user_id, ai_config
+            ):
                 if isinstance(item, StreamEvent):
                     yield self._format_event(item)
                 else:
@@ -226,12 +245,18 @@ class MessageService:
         return messages
 
     def _prepare_agent_plan(self, payload: MessageCreate, history: list[Message]):
+        user_skills = (
+            self.skill_manager.runtime_skills(payload.user_id)
+            if self.skill_manager is not None
+            else []
+        )
         if self.agent_coordinator is not None:
             return self.agent_coordinator.prepare(
                 requested_route_mode=payload.route_mode,
                 user_id=payload.user_id,
                 content=payload.content.strip(),
                 history=history,
+                user_skills=user_skills,
             )
 
         messages = self._build_ai_messages(payload.content.strip(), payload.route_mode, history)
@@ -243,9 +268,25 @@ class MessageService:
             messages=messages,
         )
 
-    def _run_task_agent(self, messages: list[dict], history: list[Message]):
+    def _run_task_agent(
+        self,
+        messages: list[dict],
+        history: list[Message],
+        user_id,
+        ai_config,
+    ):
+        user_skills = (
+            self.skill_manager.runtime_skills(user_id)
+            if self.skill_manager is not None
+            else []
+        )
         if self.agent_coordinator is not None:
-            yield from self.agent_coordinator.run_task(messages, history)
+            yield from self.agent_coordinator.run_task(
+                messages,
+                history,
+                user_skills=user_skills,
+                ai_config=ai_config,
+            )
             return
 
         activated_skills = self.skill_registry.match(messages[-1].get("content", ""))
@@ -255,8 +296,19 @@ class MessageService:
                 "message": "Loaded SKILL.md",
                 "percent": 0.15,
             })
-        agent_messages = self.agent.build_messages(messages[-1].get("content", ""), history, activated_skills)
-        yield from self.agent_orchestrator.run(agent_messages, history)
+        agent_messages = self.agent.build_messages(
+            messages[-1].get("content", ""),
+            history,
+            activated_skills,
+            user_skills=user_skills,
+            tool_catalog=self.agent_orchestrator.tool_registry.render_catalog(),
+        )
+        yield from self.agent_orchestrator.run(
+            agent_messages,
+            history,
+            user_skills=user_skills,
+            ai_config=ai_config,
+        )
 
     def _schedule_memory_write(self, payload: MessageCreate, state: MessageStreamState) -> None:
         if self.memory_agent is None:
