@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.api.deps import get_current_user_id, get_goal_service
+from app.core.exceptions import AppError, ConflictError, NotFoundError
 from app.schemas.goal import GoalCreate, GoalCheckinOut, GoalOut, GoalUpdate
 from app.services.goal_service import GoalService
 
@@ -60,8 +61,12 @@ def checkin_goal(
     try:
         result = service.checkin_goal(user_id, goal_id)
         return GoalCheckinOut(**result)
-    except Exception as e:
+    except NotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except AppError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get("/due", response_model=list[GoalCheckinOut])

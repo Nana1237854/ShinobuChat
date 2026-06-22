@@ -297,6 +297,28 @@ class GoalServiceTests(unittest.TestCase):
         goals = svc.list_goals(self.user_id)
         self.assertEqual(len(goals), 0)
 
+    # 18. completed -> active recalculates next_check_at
+    def test_completed_to_active_recalculates_next_check_at(self):
+        svc = self._svc()
+        goal = svc.create_goal(self.user_id, self._create_payload(title="重算测试", cadence_days=7))
+        completed = svc.update_goal(self.user_id, goal.id, self._update_payload(status="completed"))
+        self.assertIsNone(completed.next_check_at, "completing should clear next_check_at")
+
+        reactivated = svc.update_goal(self.user_id, goal.id, self._update_payload(status="active"))
+        self.assertEqual(reactivated.status, "active")
+        self.assertIsNotNone(reactivated.next_check_at)
+        delta = (reactivated.next_check_at.replace(tzinfo=timezone.utc) - datetime.now(timezone.utc)).days
+        self.assertGreaterEqual(delta, 6, "re-activating should set next_check_at ~cadence_days ahead")
+
+    # 19. completed goal checkin raises ConflictError
+    def test_completed_goal_checkin_raises_conflict(self):
+        from app.core.exceptions import ConflictError
+        svc = self._svc()
+        goal = svc.create_goal(self.user_id, self._create_payload(title="冲突测试"))
+        svc.update_goal(self.user_id, goal.id, self._update_payload(status="completed"))
+        with self.assertRaises(ConflictError):
+            svc.checkin_goal(self.user_id, goal.id)
+
 
 if __name__ == "__main__":
     unittest.main()

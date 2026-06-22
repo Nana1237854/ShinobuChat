@@ -6,7 +6,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.models.user_goal import UserGoal
 from app.services.realtime_sync_service import realtime_sync_service
 
@@ -63,11 +63,11 @@ class GoalService:
                 elif value == "active":
                     goal.paused_at = None
                     goal.completed_at = None
-                    if goal.next_check_at is None:
-                        goal.next_check_at = now + timedelta(days=goal.cadence_days)
+                    goal.next_check_at = now + timedelta(days=goal.cadence_days)
                 elif value == "completed":
                     goal.completed_at = now
                     goal.paused_at = None
+                    goal.next_check_at = None
             elif key == "cadence_days" and value is not None:
                 goal.cadence_days = value
                 goal.next_check_at = now + timedelta(days=value)
@@ -88,7 +88,7 @@ class GoalService:
     def checkin_goal(self, user_id: UUID, goal_id: UUID, note: str | None = None) -> dict:
         goal = self._get_user_goal(user_id, goal_id)
         if goal.status == "completed":
-            raise NotFoundError("Cannot check in a completed goal")
+            raise ConflictError("Cannot check in a completed goal")
         now = datetime.now(timezone.utc)
         goal.last_checked_at = now
         goal.next_check_at = now + timedelta(days=goal.cadence_days)
