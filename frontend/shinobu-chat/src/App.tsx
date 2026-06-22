@@ -752,7 +752,7 @@ export default function App() {
         </footer>
       </aside>
 
-      <section className="stage-zone">
+      <section className="stage-zone" role="img" aria-label="Shinobu 的 Live2D 角色舞台，展示当前角色动作与表情">
         <Live2DStage
           model={selectedModel}
           settings={petSettings}

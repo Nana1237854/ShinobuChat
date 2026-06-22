@@ -42,18 +42,18 @@ export function AuthPanel({ onRegister, onLogin, onSession }: AuthPanelProps) {
         <button className={mode === 'login' ? 'is-active' : ''} type="button" onClick={() => setMode('login')}>登录</button>
         <button className={mode === 'register' ? 'is-active' : ''} type="button" onClick={() => setMode('register')}>注册</button>
       </div>
-      <label>
+      <label htmlFor="auth-email">
         <span>邮箱</span>
-        <input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" />
+        <input id="auth-email" type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder="请输入邮箱" />
       </label>
-      <label>
+      <label htmlFor="auth-password">
         <span>密码</span>
-        <input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />
+        <input id="auth-password" type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} placeholder="请输入密码" />
       </label>
       {mode === 'register' ? (
-        <label>
+        <label htmlFor="auth-display-name">
           <span>显示名</span>
-          <input value={displayName} onChange={event => setDisplayName(event.target.value)} />
+          <input id="auth-display-name" value={displayName} onChange={event => setDisplayName(event.target.value)} placeholder="你想怎么称呼？" />
         </label>
       ) : null}
       {error ? <div className="auth-error">{error}</div> : null}

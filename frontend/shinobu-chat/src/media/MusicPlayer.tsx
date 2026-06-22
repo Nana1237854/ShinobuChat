@@ -44,7 +44,7 @@ export function MusicPlayer({ tracks }: MusicPlayerProps) {
 
   return (
     <section className="music-player" aria-label="Music player">
-      <audio ref={audioRef} src={track?.url} onEnded={() => move(1)} />
+      <audio ref={audioRef} src={track?.url} preload="none" onEnded={() => move(1)} />
       <div className="music-meta">
         <strong>{track?.title || 'No track'}</strong>
         <span>{track?.artist || 'Add music in assets/music'}</span>
