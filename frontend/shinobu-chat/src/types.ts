@@ -1,4 +1,4 @@
-export type RouteMode = 'auto' | 'chat' | 'agent';
+﻿export type RouteMode = 'auto' | 'chat' | 'agent';
 export type MessageRole = 'user' | 'assistant' | 'system';
 export type ReminderMode = 'none' | 'toast' | 'sound';
 export type AvatarTool = 'lollipop' | 'fist' | 'hammer';
@@ -66,9 +66,9 @@ export type ChatMessage = ApiMessage & {
 export type StreamEvent =
   | { type: 'conversation'; conversationId: string; title: string; routeMode: RouteMode; userMessage: MessageOut }
   | { type: 'chunk'; delta: string }
-  | { type: 'audio'; text: string; audio: string; emotion: string | null }
-  | { type: 'done'; assistantMessages: MessageOut[] }
-  | { type: 'emotion'; emotion: string }
+  | { type: 'audio'; text: string; audio: string; emotion: string | null; emotionState?: EmotionState | null }
+  | { type: 'done'; assistantMessages: MessageOut[]; emotionState?: EmotionState | null }
+  | { type: 'emotion'; emotion: string; emotionState?: EmotionState | null }
   | { type: 'progress'; skillName: string; message: string; percent: number }
   | { type: 'error'; code: string; hint: string };
 
@@ -138,4 +138,176 @@ export type MarketSkill = {
   version: string;
   author: string;
   official: boolean;
+};
+
+export type ConfigField = UserConfigField;
+
+export type ConfigListResponse = UserConfigResponse;
+
+export type ConfigUpdateRequest = Partial<{
+  ai_api_key: string | null;
+  ai_base_url: string | null;
+  ai_model: string | null;
+  ai_request_timeout_seconds: number | null;
+  ai_supports_image_input: boolean | null;
+  ai_lightweight_max_tokens: number | null;
+  roleplay_llm_model: string | null;
+  roleplay_llm_temperature: number | null;
+  decision_llm_model: string | null;
+  decision_llm_temperature: number | null;
+  google_search_api_key: string | null;
+  google_search_cx: string | null;
+  edge_tts_voice: string | null;
+  asr_engine: string | null;
+  whisper_api_key: string | null;
+}>;
+
+export type SkillSummary = Omit<UserSkill, 'content'>;
+
+export type SkillDetail = SkillSummary & {
+  content: string;
+};
+
+export type SkillInstallRequest = {
+  install_type: 'text';
+  content: string;
+};
+
+export type ReminderEventType =
+  | 'reminder.due_soon'
+  | 'reminder.due_now'
+  | 'reminder.snoozed'
+  | 'reminder.dismissed';
+
+export type ReminderEvent = {
+  type: ReminderEventType;
+  todo_id: string;
+  user_id: string;
+  title: string;
+  due_at: string | null;
+  message: string;
+  reminder_count: number;
+  delivery: string;
+};
+
+export type MemoryTimelineItem = {
+  memory_id: string;
+  content: string;
+  importance: number;
+  created_at: string;
+  source_msg_id?: string | null;
+  related_conversation_id?: string | null;
+  tags: string[];
+  time_bucket: 'today' | 'this_week' | 'this_month' | 'earlier' | string;
+};
+
+export type MemorySearchResult = {
+  memory_id: string;
+  content: string;
+  importance: number;
+  created_at: string;
+  source_msg_id?: string | null;
+  related_conversation_id?: string | null;
+  score?: number | null;
+  source_message_summary?: string | null;
+};
+
+export type MemoryContextMessage = {
+  id: string;
+  role: MessageRole | string;
+  content: string;
+  created_at: string;
+};
+
+export type MemoryContext = {
+  memory_id: string;
+  source_msg_id?: string | null;
+  conversation_id?: string | null;
+  messages: MemoryContextMessage[];
+  detail?: string | null;
+};
+
+export type PersonaVerbosity = 'quiet' | 'balanced' | 'talkative';
+
+export type PersonaWarmth = 'calm' | 'warm' | 'playful';
+
+export type PersonaInitiative = 'passive' | 'balanced' | 'proactive';
+
+export type PersonaWorkStyle = 'casual' | 'focused' | 'strict';
+
+export type PersonaSettings = {
+  user_id: string;
+  verbosity: PersonaVerbosity;
+  warmth: PersonaWarmth;
+  initiative: PersonaInitiative;
+  work_style: PersonaWorkStyle;
+  updated_at: string;
+};
+
+export type PersonaSettingsUpdateRequest = Partial<Pick<
+  PersonaSettings,
+  'verbosity' | 'warmth' | 'initiative' | 'work_style'
+>>;
+
+export type GoalStatus = 'active' | 'paused' | 'completed';
+
+export type GoalItem = {
+  id: string;
+  user_id: string;
+  title: string;
+  description?: string | null;
+  category?: string | null;
+  status: GoalStatus;
+  cadence_days: number;
+  last_checked_at?: string | null;
+  next_check_at?: string | null;
+  reminder_enabled: boolean;
+  completed_at?: string | null;
+  paused_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GoalCreateRequest = {
+  title: string;
+  description?: string | null;
+  category?: string | null;
+  cadence_days?: number;
+  reminder_enabled?: boolean;
+};
+
+export type GoalUpdateRequest = Partial<{
+  title: string;
+  description: string | null;
+  category: string | null;
+  status: GoalStatus;
+  cadence_days: number;
+  reminder_enabled: boolean;
+}>;
+
+export type GoalCheckin = {
+  goal_id: string;
+  user_id: string;
+  title: string;
+  category?: string | null;
+  status: GoalStatus;
+  checked: boolean;
+  next_check_at?: string | null;
+  message: string;
+};
+
+export type EmotionLabel =
+  | 'neutral'
+  | 'happy'
+  | 'worried'
+  | 'stressed'
+  | 'tired'
+  | 'lonely'
+  | string;
+
+export type EmotionState = {
+  emotion_label: EmotionLabel;
+  confidence?: number | null;
+  intensity?: number | null;
+  reply_style_hint?: string | null;
 };

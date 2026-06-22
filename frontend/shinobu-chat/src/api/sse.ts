@@ -46,12 +46,58 @@ export function normalizeStreamEvent(raw: RawSseEvent): StreamEvent | null {
     return { type: 'chunk', delta: payload.delta };
   }
   if (raw.eventName === 'emotion') {
-    const payload = raw.payload as { emotion: string };
-    return { type: 'emotion', emotion: payload.emotion };
+    const payload = raw.payload as {
+      emotion?: string;
+      emotion_label?: string;
+      confidence?: number | null;
+      intensity?: number | null;
+      reply_style_hint?: string | null;
+    };
+    const emotion = payload.emotion ?? payload.emotion_label ?? 'neutral';
+    const hasEmotionState = typeof payload.emotion_label === 'string';
+    return {
+      type: 'emotion',
+      emotion,
+      ...(hasEmotionState
+        ? {
+            emotionState: {
+              emotion_label: payload.emotion_label ?? emotion,
+              confidence: payload.confidence ?? null,
+              intensity: payload.intensity ?? null,
+              reply_style_hint: payload.reply_style_hint ?? null,
+            },
+          }
+        : {}),
+    };
   }
   if (raw.eventName === 'audio') {
-    const payload = raw.payload as { text: string; audio: string; emotion: string | null };
-    return { type: 'audio', text: payload.text, audio: payload.audio, emotion: payload.emotion };
+    const payload = raw.payload as {
+      text: string;
+      audio: string;
+      emotion: string | null;
+      emotion_state?: {
+        emotion_label?: string;
+        confidence?: number | null;
+        intensity?: number | null;
+        reply_style_hint?: string | null;
+      } | null;
+    };
+    return {
+      type: 'audio',
+      text: payload.text,
+      audio: payload.audio,
+      emotion: payload.emotion,
+      ...(payload.emotion_state
+        ? {
+            emotionState: {
+              emotion_label: payload.emotion_state.emotion_label ?? payload.emotion ?? 'neutral',
+              confidence: payload.emotion_state.confidence ?? null,
+              intensity: payload.emotion_state.intensity ?? null,
+              reply_style_hint: payload.emotion_state.reply_style_hint ?? null,
+            },
+          }
+        : {}),
+    };
   }
   if (raw.eventName === 'progress') {
     const payload = raw.payload as { skill_name: string; message: string; percent: number };
@@ -62,8 +108,30 @@ export function normalizeStreamEvent(raw: RawSseEvent): StreamEvent | null {
     return { type: 'error', code: payload.code, hint: payload.hint };
   }
   if (raw.eventName === 'done') {
-    const payload = raw.payload as { assistant_messages?: Extract<StreamEvent, { type: 'done' }>['assistantMessages']; assistant_message?: never };
-    return { type: 'done', assistantMessages: payload.assistant_messages ?? [] };
+    const payload = raw.payload as {
+      assistant_messages?: Extract<StreamEvent, { type: 'done' }>['assistantMessages'];
+      emotion_state?: {
+        emotion_label?: string;
+        confidence?: number | null;
+        intensity?: number | null;
+        reply_style_hint?: string | null;
+      } | null;
+      assistant_message?: never;
+    };
+    return {
+      type: 'done',
+      assistantMessages: payload.assistant_messages ?? [],
+      ...(payload.emotion_state
+        ? {
+            emotionState: {
+              emotion_label: payload.emotion_state.emotion_label ?? 'neutral',
+              confidence: payload.emotion_state.confidence ?? null,
+              intensity: payload.emotion_state.intensity ?? null,
+              reply_style_hint: payload.emotion_state.reply_style_hint ?? null,
+            },
+          }
+        : {}),
+    };
   }
   return null;
 }

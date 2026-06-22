@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bot,
   ChevronLeft,
@@ -19,13 +19,16 @@ import { AuthPanel } from './auth/AuthPanel';
 import { ConversationList } from './chat/ConversationList';
 import { MessageList } from './chat/MessageList';
 import { Composer } from './chat/Composer';
-import { CharacterEditor } from './chat/CharacterEditor';
 import { mergeServerMessages } from './chat/messageState';
 import { Live2DStage } from './live2d/Live2DStage';
 import { LIP_SYNC_FFT_SIZE, LIP_SYNC_NOISE_FLOOR, LIP_SYNC_SCALE, LIP_SYNC_SMOOTHING, ANALYSER_SMOOTHING } from './live2d/lipSync';
 import { PetTaskbar } from './desktop-pet/PetTaskbar';
-import { PetSettingsPanel } from './desktop-pet/PetSettingsPanel';
 import { MusicPlayer } from './media/MusicPlayer';
+import { SettingsPage, type SettingsTab } from './settings/SettingsPage';
+import { ReminderBubble } from './reminders/ReminderBubble';
+import { getDueReminders, dismissReminder, snoozeReminder } from './api/reminders';
+import { listGoals } from './api/goals';
+import { subscribeReminderEvents } from './realtime/sseClient';
 import { captureScreen } from './media/screenshot';
 import {
   listConversations,
@@ -53,26 +56,46 @@ import type {
   BackgroundItem,
   ChatMessage,
   Conversation,
+  EmotionState,
+  GoalItem,
   Live2DModelItem,
   MusicTrack,
   PetSettings,
+  ReminderEvent,
   RouteMode,
 } from './types';
 
 const SESSION_KEY = 'shinobu-auth-session';
+const REMINDER_DEDUPE_WINDOW_MS = 2 * 60 * 1000;
+const SUPPORTED_EMOTION_LABELS = new Set(['neutral', 'happy', 'worried', 'stressed', 'tired', 'lonely']);
 
 function loadSession(): AuthSession | null {
   try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? JSON.parse(raw) as AuthSession : null;
+    const sessionRaw = window.sessionStorage.getItem(SESSION_KEY);
+    if (sessionRaw) {
+      return JSON.parse(sessionRaw) as AuthSession;
+    }
+
+    const legacyRaw = window.localStorage.getItem(SESSION_KEY);
+    if (!legacyRaw) return null;
+
+    window.sessionStorage.setItem(SESSION_KEY, legacyRaw);
+    window.localStorage.removeItem(SESSION_KEY);
+    return JSON.parse(legacyRaw) as AuthSession;
   } catch {
     return null;
   }
 }
 
 function saveSession(session: AuthSession | null) {
-  if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  else localStorage.removeItem(SESSION_KEY);
+  if (session) {
+    window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    window.localStorage.removeItem(SESSION_KEY);
+    return;
+  }
+
+  window.sessionStorage.removeItem(SESSION_KEY);
+  window.localStorage.removeItem(SESSION_KEY);
 }
 
 function toChatMessage(message: ApiMessage): ChatMessage {
@@ -94,13 +117,19 @@ export default function App() {
   const [tracks, setTracks] = useState<MusicTrack[]>([]);
   const [petSettings, setPetSettings] = useState<PetSettings>(() => loadPetSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('appearance');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarPanel, setSidebarPanel] = useState<'history' | 'models' | 'scenes' | null>('history');
   const [activeTool, setActiveTool] = useState<AvatarTool | null>(null);
   const [activeEmotion, setActiveEmotion] = useState<string | null>(null);
+  const [emotionState, setEmotionState] = useState<EmotionState | null>(null);
   const [petFeedback, setPetFeedback] = useState<string | null>(null);
   const [galgameMode, setGalgameMode] = useState(false);
   const [spokenLines, setSpokenLines] = useState<string[]>([]);
+  const [goalPreview, setGoalPreview] = useState<GoalItem[]>([]);
+  const [reminderQueue, setReminderQueue] = useState<ReminderEvent[]>([]);
+  const [reminderAction, setReminderAction] = useState<'snooze' | 'dismiss' | null>(null);
+  const seenReminderIdsRef = useRef<Map<string, number>>(new Map());
   const audioCtxRef = useRef<AudioContext | null>(null);
   const audioNextRef = useRef(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -237,6 +266,19 @@ export default function App() {
     if (audioCtxRef.current) audioCtxRef.current.close().catch(() => {});
   }, []);
 
+  const refreshGoalPreview = useCallback(async () => {
+    if (!session) {
+      setGoalPreview([]);
+      return;
+    }
+    try {
+      const activeGoals = await listGoals(session.accessToken, { status: 'active' });
+      setGoalPreview(activeGoals.slice(0, 3));
+    } catch {
+      setGoalPreview([]);
+    }
+  }, [session]);
+
   const refreshConversations = useCallback(async () => {
     if (!session) return;
     try {
@@ -249,6 +291,10 @@ export default function App() {
   useEffect(() => {
     refreshConversations();
   }, [refreshConversations]);
+
+  useEffect(() => {
+    refreshGoalPreview();
+  }, [refreshGoalPreview]);
 
   useEffect(() => {
     if (!session || !conversationId) {
@@ -290,6 +336,10 @@ export default function App() {
     setConversationId(null);
     setConversations([]);
     setMessages([]);
+    setGoalPreview([]);
+    setReminderQueue([]);
+    setEmotionState(null);
+    seenReminderIdsRef.current.clear();
   };
 
   const startNewConversation = () => {
@@ -297,6 +347,11 @@ export default function App() {
     localStorage.removeItem('shinobu-conversation-id');
     setMessages([]);
     setStatus('New conversation');
+  };
+
+  const openSettingsTab = (tab: SettingsTab = 'appearance') => {
+    setSettingsInitialTab(tab);
+    setSettingsOpen(true);
   };
 
   const notify = (message: string) => {
@@ -308,6 +363,120 @@ export default function App() {
       audio.play().catch(() => {});
     }
   };
+
+  const enqueueReminders = useCallback((incoming: ReminderEvent[]) => {
+    if (!incoming.length) return;
+    setReminderQueue(current => {
+      const now = Date.now();
+      const seen = seenReminderIdsRef.current;
+      for (const [todoId, seenAt] of Array.from(seen.entries())) {
+        if (now - seenAt > REMINDER_DEDUPE_WINDOW_MS) {
+          seen.delete(todoId);
+        }
+      }
+
+      const queuedIds = new Set(current.map(item => item.todo_id));
+      const nextQueue = [...current];
+      for (const item of incoming) {
+        const seenAt = seen.get(item.todo_id);
+        if (queuedIds.has(item.todo_id) || (seenAt && now - seenAt < REMINDER_DEDUPE_WINDOW_MS)) {
+          continue;
+        }
+        queuedIds.add(item.todo_id);
+        seen.set(item.todo_id, now);
+        nextQueue.push(item);
+      }
+      return nextQueue;
+    });
+  }, []);
+
+  const removeReminderFromQueue = useCallback((todoId: string) => {
+    setReminderQueue(current => current.filter(item => item.todo_id !== todoId));
+  }, []);
+
+  const handleSnoozeReminder = useCallback(async (todoId: string) => {
+    if (!session) return;
+    setReminderAction('snooze');
+    try {
+      await snoozeReminder(session.accessToken, todoId, 10);
+      removeReminderFromQueue(todoId);
+      notify('这条提醒我先帮你往后放一放。');
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to snooze reminder');
+    } finally {
+      setReminderAction(null);
+    }
+  }, [notify, removeReminderFromQueue, session]);
+
+  const handleDismissReminder = useCallback(async (todoId: string) => {
+    if (!session) return;
+    setReminderAction('dismiss');
+    try {
+      await dismissReminder(session.accessToken, todoId);
+      removeReminderFromQueue(todoId);
+      notify('这条提醒我先替你收起来了。');
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to dismiss reminder');
+    } finally {
+      setReminderAction(null);
+    }
+  }, [notify, removeReminderFromQueue, session]);
+
+  useEffect(() => {
+    if (!session) {
+      setReminderQueue([]);
+      seenReminderIdsRef.current.clear();
+      return;
+    }
+
+    let cancelled = false;
+
+    getDueReminders(session.accessToken)
+      .then(items => {
+        if (!cancelled) enqueueReminders(items);
+      })
+      .catch(nextError => {
+        if (!cancelled) {
+          setError(nextError instanceof Error ? nextError.message : 'Failed to load reminders');
+        }
+      });
+
+    const unsubscribe = subscribeReminderEvents({
+      userId: session.userId,
+      onReminder: event => {
+        if (!cancelled) enqueueReminders([event]);
+      },
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [enqueueReminders, session]);
+
+  const applyEmotionState = useCallback((nextState: EmotionState | null | undefined) => {
+    if (!nextState) return;
+
+    const normalizedLabel = (nextState.emotion_label || 'neutral').trim().toLowerCase() || 'neutral';
+    const safeLabel = SUPPORTED_EMOTION_LABELS.has(normalizedLabel) ? normalizedLabel : 'neutral';
+    const confidence = nextState.confidence ?? 0;
+    const intensity = nextState.intensity ?? 0;
+    const lowConfidence = confidence < 0.55;
+    const effectiveLabel = lowConfidence ? 'neutral' : safeLabel;
+    const effectiveHint = lowConfidence ? null : nextState.reply_style_hint ?? null;
+
+    setEmotionState({
+      ...nextState,
+      emotion_label: effectiveLabel,
+      confidence,
+      intensity,
+      reply_style_hint: effectiveHint,
+    });
+
+    if (!lowConfidence || normalizedLabel === 'neutral') {
+      setActiveEmotion(effectiveLabel);
+    }
+  }, []);
 
   const updateAvatarEmotion = (message?: ApiMessage | null) => {
     if (message?.emotion) {
@@ -321,6 +490,7 @@ export default function App() {
     if (!content) return;
     setStreaming(true);
     setError(null);
+    setEmotionState(null);
     setStatus('Shinobu is replying...');
 
     let pendingId = `pending-${Date.now()}`;
@@ -368,6 +538,11 @@ export default function App() {
           }
           if (event.type === 'emotion') {
             setActiveEmotion(event.emotion);
+            if (event.emotionState) {
+              applyEmotionState(event.emotionState);
+            } else {
+              setEmotionState(null);
+            }
           }
           if (event.type === 'progress') {
             setStatus(`${event.skillName}: ${event.message} (${Math.round(event.percent * 100)}%)`);
@@ -389,6 +564,7 @@ export default function App() {
             ]);
             playBase64Audio(event.audio);
             if (event.emotion) setActiveEmotion(event.emotion);
+            if (event.emotionState) applyEmotionState(event.emotionState);
             setSpokenLines(prev => [...prev, event.text]);
             setStatus(event.text);
           }
@@ -400,6 +576,9 @@ export default function App() {
             });
             if (event.assistantMessages && event.assistantMessages.length > 0) {
               updateAvatarEmotion(event.assistantMessages[event.assistantMessages.length - 1]);
+            }
+            if (event.emotionState) {
+              applyEmotionState(event.emotionState);
             }
             refreshConversations();
           }
@@ -508,7 +687,7 @@ export default function App() {
             <Music2 size={18} />
             <span>场景音乐</span>
           </button>
-          <button type="button" className="sidebar-item" onClick={() => setSettingsOpen(true)}>
+          <button type="button" className="sidebar-item" onClick={() => openSettingsTab('appearance')}>
             <MoreHorizontal size={18} />
             <span>更多</span>
           </button>
@@ -525,29 +704,49 @@ export default function App() {
           {sidebarPanel === 'models' ? (
             <div className="sidebar-card">
               <strong>角色与模型</strong>
-              <span>{selectedModel?.name || '正在加载 Live2D 模型'}</span>
-              <button type="button" className="sidebar-mini-action" onClick={() => setSettingsOpen(true)}>
+              <span>{selectedModel?.name || '姝ｅ湪鍔犺浇 Live2D 妯″瀷'}</span>
+              <button type="button" className="sidebar-mini-action" onClick={() => openSettingsTab('persona')}>
                 打开角色设置
               </button>
             </div>
           ) : null}
           {sidebarPanel === 'scenes' ? (
             <div className="sidebar-card">
-              <strong>场景音乐</strong>
+              <strong>鍦烘櫙闊充箰</strong>
               <span>{selectedBackground?.name || '默认场景'} · {tracks.length} 首音乐</span>
-              <button type="button" className="sidebar-mini-action" onClick={() => setSettingsOpen(true)}>
+              <button type="button" className="sidebar-mini-action" onClick={() => openSettingsTab('appearance')}>
                 调整舞台设置
               </button>
             </div>
           ) : null}
         </div>
 
+        {goalPreview.length > 0 ? (
+          <div className="sidebar-card goal-preview-card">
+            <strong>长期目标</strong>
+            <span>只展示当前最值得跟进的 1-3 项，不打断聊天主流程。</span>
+            <div className="goal-preview-list">
+              {goalPreview.map(goal => (
+                <button
+                  type="button"
+                  key={goal.id}
+                  className="goal-preview-item"
+                  onClick={() => openSettingsTab('goals')}
+                >
+                  <strong>{goal.title}</strong>
+                  <small>{goal.next_check_at ? new Date(goal.next_check_at).toLocaleDateString('zh-CN') : '待安排'}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <footer className="sidebar-footer">
           <button type="button" className="sidebar-user" title={session.email}>
             <span>{(session.displayName || session.email || 'S').slice(0, 1).toUpperCase()}</span>
             <small>{session.displayName || session.email}</small>
           </button>
-          <button type="button" className="icon-button" title="设置" onClick={() => setSettingsOpen(true)}>
+          <button type="button" className="icon-button" title="设置" onClick={() => openSettingsTab('appearance')}>
             <Settings size={17} />
           </button>
         </footer>
@@ -566,25 +765,42 @@ export default function App() {
         <PetTaskbar
           activeTool={activeTool}
           onToolSelect={handleAvatarTool}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() => openSettingsTab('appearance')}
           onScreenshot={handleScreenshot}
         />
         {settingsOpen ? (
-          <>
-            <PetSettingsPanel
-              settings={petSettings}
-              models={models}
-              backgrounds={backgrounds}
-              onChange={setPetSettings}
-              onRefreshModels={() => {
-                reloadAssets().catch(nextError => {
-                  setError(nextError instanceof Error ? nextError.message : 'Failed to refresh assets');
-                });
-              }}
-              onClose={() => setSettingsOpen(false)}
-            />
-            <CharacterEditor userId={session.userId} />
-          </>
+          <SettingsPage
+            accessToken={session.accessToken}
+            userId={session.userId}
+            initialTab={settingsInitialTab}
+            petSettings={petSettings}
+            models={models}
+            backgrounds={backgrounds}
+            onPetSettingsChange={setPetSettings}
+            onRefreshModels={() => {
+              reloadAssets().catch(nextError => {
+                setError(nextError instanceof Error ? nextError.message : 'Failed to refresh assets');
+              });
+            }}
+            onGoalsChanged={refreshGoalPreview}
+            onClose={() => setSettingsOpen(false)}
+          />
+        ) : null}
+        {reminderQueue.length > 0 ? (
+          <ReminderBubble
+            reminder={reminderQueue[0]}
+            queuedCount={Math.max(reminderQueue.length - 1, 0)}
+            busy={reminderAction}
+            onSnooze={handleSnoozeReminder}
+            onDismiss={handleDismissReminder}
+            onClose={removeReminderFromQueue}
+          />
+        ) : null}
+        {routeMode === 'chat' && emotionState?.reply_style_hint ? (
+          <div className={['emotion-hint', emotionState.intensity && emotionState.intensity >= 0.72 ? 'is-strong' : ''].filter(Boolean).join(' ')}>
+            <strong>Shinobu</strong>
+            <span>{emotionState.reply_style_hint}</span>
+          </div>
         ) : null}
         {spokenLines.length > 0 ? (
           <div className="spoken-subtitle">
@@ -631,3 +847,10 @@ export default function App() {
     </main>
   );
 }
+
+
+
+
+
+
+

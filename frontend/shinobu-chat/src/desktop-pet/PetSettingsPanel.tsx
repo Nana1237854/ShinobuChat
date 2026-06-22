@@ -1,4 +1,4 @@
-import { X } from 'lucide-react';
+﻿import { X } from 'lucide-react';
 import type { BackgroundItem, Live2DModelItem, PetSettings, ReminderMode } from '../types';
 
 type PetSettingsPanelProps = {
@@ -11,9 +11,9 @@ type PetSettingsPanelProps = {
 };
 
 const reminderModes: Array<{ value: ReminderMode; label: string }> = [
-  { value: 'none', label: 'None' },
-  { value: 'toast', label: 'Toast' },
-  { value: 'sound', label: 'Sound' },
+  { value: 'none', label: '关闭提醒反馈' },
+  { value: 'toast', label: '仅显示气泡' },
+  { value: 'sound', label: '气泡并播放提示音' },
 ];
 
 export function PetSettingsPanel({
@@ -25,10 +25,10 @@ export function PetSettingsPanel({
   onClose,
 }: PetSettingsPanelProps) {
   return (
-    <section className="pet-settings-panel" aria-label="Pet settings">
+    <section className="pet-settings-panel" aria-label="Live2D 外观设置">
       <header>
         <h2>桌宠设置</h2>
-        <button type="button" title="Close" onClick={onClose}><X size={16} /></button>
+        <button type="button" title="关闭" onClick={onClose}><X size={16} /></button>
       </header>
       <label>
         <span>Live2D 模型</span>
@@ -36,12 +36,12 @@ export function PetSettingsPanel({
           value={settings.modelId || ''}
           onChange={event => onChange({ ...settings, modelId: event.target.value || undefined })}
         >
-          <option value="">无模型占位</option>
+          <option value="">暂无可用模型</option>
           {models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
         </select>
       </label>
       <label>
-        <span>背景</span>
+        <span>舞台背景</span>
         <select
           value={settings.backgroundId}
           onChange={event => onChange({ ...settings, backgroundId: event.target.value })}
@@ -61,7 +61,7 @@ export function PetSettingsPanel({
         />
       </label>
       <label>
-        <span>提醒方式</span>
+        <span>提醒反馈</span>
         <select
           value={settings.reminderMode}
           onChange={event => onChange({ ...settings, reminderMode: event.target.value as ReminderMode })}
@@ -81,7 +81,7 @@ export function PetSettingsPanel({
         type="button"
         onClick={() => onChange({ ...settings, scale: 0.32, x: 52, y: 72 })}
       >
-        重置位置
+        重置舞台位置
       </button>
     </section>
   );

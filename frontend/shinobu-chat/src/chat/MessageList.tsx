@@ -63,8 +63,8 @@ export function MessageList({ messages }: MessageListProps) {
     return (
       <div className="message-list" ref={listRef}>
         <div className="welcome-card">
-          <h2>今天想和忍聊什么？</h2>
-          <p>给 Shinobu 发消息，她会通过实时流式回复陪你继续。</p>
+          <h2>What would you like to talk about with Shinobu today?</h2>
+          <p>Send Shinobu a message and she will stay with you through the live reply stream.</p>
         </div>
       </div>
     );
@@ -74,7 +74,7 @@ export function MessageList({ messages }: MessageListProps) {
     <div className="message-list" ref={listRef}>
       {messages.map(message => (
         <article key={message.id} className={`message-row message-row-${message.role}`} data-status={message.status || ''}>
-          <div className="message-avatar">{message.role === 'user' ? '你' : '忍'}</div>
+          <div className="message-avatar">{message.role === 'user' ? 'U' : 'S'}</div>
           <div className="message-stack">
             <div className="message-meta">
               <span>{message.role === 'user' ? 'You' : 'Shinobu'}</span>
