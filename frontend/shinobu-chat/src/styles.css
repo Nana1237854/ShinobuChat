@@ -75,7 +75,7 @@ button:disabled {
   border-radius: 8px;
   color: white;
   font-weight: 800;
-  background: linear-gradient(135deg, #ec7186, #597fdc);
+  background: linear-gradient(135deg, #597fdc, #2f67df);
 }
 
 .auth-copy h1,
@@ -243,7 +243,7 @@ button:disabled {
   flex: 0 0 auto;
   border-radius: 50%;
   color: white;
-  background: linear-gradient(135deg, #a78bfa, #ec7186);
+  background: linear-gradient(135deg, #597fdc, #36559f);
 }
 
 .sidebar-menu {
@@ -708,7 +708,7 @@ button:disabled {
   flex: 0 0 auto;
   border-radius: 50%;
   color: white;
-  background: linear-gradient(135deg, #ec7186, #597fdc);
+  background: linear-gradient(135deg, #597fdc, #2f67df);
 }
 
 .chat-title h1 {
@@ -849,7 +849,7 @@ button:disabled {
   flex: 0 0 auto;
   border-radius: 50%;
   color: white;
-  background: linear-gradient(135deg, #a78bfa, #597fdc);
+  background: linear-gradient(135deg, #516fc3, #294a9b);
   box-shadow: 0 8px 18px rgba(89, 127, 220, 0.18);
   font-size: 0.72rem;
   font-weight: 760;

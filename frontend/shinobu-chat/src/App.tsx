@@ -704,7 +704,7 @@ export default function App() {
           {sidebarPanel === 'models' ? (
             <div className="sidebar-card">
               <strong>角色与模型</strong>
-              <span>{selectedModel?.name || '姝ｅ湪鍔犺浇 Live2D 妯″瀷'}</span>
+              <span>{selectedModel?.name || '正在加载 Live2D 模型'}</span>
               <button type="button" className="sidebar-mini-action" onClick={() => openSettingsTab('persona')}>
                 打开角色设置
               </button>
@@ -712,7 +712,7 @@ export default function App() {
           ) : null}
           {sidebarPanel === 'scenes' ? (
             <div className="sidebar-card">
-              <strong>鍦烘櫙闊充箰</strong>
+              <strong>场景音乐</strong>
               <span>{selectedBackground?.name || '默认场景'} · {tracks.length} 首音乐</span>
               <button type="button" className="sidebar-mini-action" onClick={() => openSettingsTab('appearance')}>
                 调整舞台设置
