@@ -1,27 +1,30 @@
 ---
-name: screen_reader
-description: 截屏 + OCR，把用户提供的屏幕截图转换成可读文本并总结界面重点。
-metadata: {"echo":{"emoji":"screen"}}
+name: screen-reader
+description: 对用户提供的截图做 OCR 或视觉识别，提取界面文字、状态和可操作项
+keywords: [截屏, 截图, OCR, 屏幕阅读, 图像识别, screen]
+version: 1.0.0
 ---
 
 # Screen Reader
 
-Use this skill when the user asks to read the screen, OCR a screenshot, understand an image, or says 截屏/截图/读屏.
+## Trigger
+
+当用户需要读取屏幕内容、OCR 截图、理解图像界面，或者说"截屏""截图""读屏""帮我看这张图"时使用这个 Skill。
 
 ## Workflow
 
-1. Check whether an image or screenshot content is available in the current request.
-2. If no image is available, ask the user to attach a screenshot or use the frontend screenshot action, then send the image back into chat.
-3. If image input is available through the active model, ask the model to extract visible text, UI state, errors, and actionable controls.
-4. If OCR tooling is available in the runtime, use it; otherwise use model vision.
+1. 检查当前请求中是否已有图像或截图内容。
+2. 如果没有图像，请用户附加截图或使用前端截图功能后发回对话。
+3. 如果有图像输入能力，调用模型视觉提取可见文字、UI 状态、错误信息和可操作控件。
+4. 如果运行环境有 OCR 工具，优先使用工具；否则使用模型视觉能力。
 
 ## Output
 
-Return:
+返回以下内容：
 
-- Visible text
-- What the screen appears to be
-- Important warnings or errors
-- Suggested next action
+- 可见文字
+- 界面类型判断
+- 重要警告或错误
+- 建议的下一步操作
 
-Do not invent text that is not visible.
+不编造不可见的文字。

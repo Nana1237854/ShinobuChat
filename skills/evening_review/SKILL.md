@@ -1,26 +1,29 @@
 ---
-name: evening_review
-description: 晚间复盘今日消息与记忆，提炼进展、情绪、待跟进事项和明日建议。
-metadata: {"echo":{"emoji":"review"}}
+name: evening-review
+description: 晚间复盘当日的对话与记忆，提炼进展、情绪变化、待跟进事项和明日建议
+keywords: [复盘, 总结, 晚间, 回顾, 今日, review]
+version: 1.0.0
 ---
 
 # Evening Review
 
-Use this skill when the user asks for 晚间复盘, 今日总结, review today, or wants to reflect on today's messages and memory.
+## Trigger
+
+当用户说"晚间复盘""帮我总结今天""回顾一下今天""review today"时使用这个 Skill。
 
 ## Workflow
 
-1. Call `conversation_digest` with enough recent messages, usually `limit=40`.
-2. Extract:
-   - 今日做过或讨论过的事
-   - 用户的情绪和能量变化
-   - 明确承诺、待办、风险
-   - 值得保存的长期记忆候选
-3. If the digest is too thin, say so directly and summarize only available context.
+1. 调用 `conversation_digest`，设置 `limit=40` 获取足够的当日消息。
+2. 提取以下内容：
+   - 今日讨论或完成的事项
+   - 用户的情绪与能量变化
+   - 明确的承诺、待办、风险点
+   - 值得保存为长期记忆的候选内容
+3. 如果上下文信息太少，如实说明，仅总结可用内容。
 
 ## Output
 
-Use four short sections:
+输出四个小节：
 
 1. 今日脉络
 2. 关键收获

@@ -1,29 +1,32 @@
 ---
-name: inspiration_organizer
-description: 按标签整理 inspiration 类型记忆，把零散灵感归类、去重并提出可落地下一步。
-metadata: {"echo":{"emoji":"inspiration"}}
+name: inspiration-organizer
+description: 按标签整理灵感类记忆，归类、去重并提出可落地的下一步行动
+keywords: [灵感, 点子, 创意, 分类, 标签, inspiration]
+version: 1.0.0
 ---
 
 # Inspiration Organizer
 
-Use this skill when the user asks to organize inspirations, 灵感, 点子, ideas, creative notes, or tagged memories.
+## Trigger
+
+当用户说"整理灵感""归类点子""帮我理一下创意""organize ideas"或需要梳理零散想法时使用这个 Skill。
 
 ## Workflow
 
-1. Call `conversation_digest` with `limit=50`.
-2. Select inspiration-like content: ideas, design sparks, product concepts, writing fragments, experiments.
-3. Deduplicate similar ideas.
-4. Assign 1-3 tags per item. Prefer concrete tags, for example `product`, `ui`, `story`, `agent`, `memory`, `research`.
-5. Suggest one small next action for the strongest ideas.
+1. 调用 `conversation_digest`，设置 `limit=50`。
+2. 筛选灵感类内容：设计想法、产品概念、写作片段、实验思路等。
+3. 对相似想法去重。
+4. 为每个条目分配 1-3 个标签，优先使用具体标签如 `product`、`ui`、`story`、`agent`、`memory`、`research`。
+5. 为最强的想法建议一个小的下一步行动。
 
 ## Output
 
-Use this shape:
+输出格式：
 
 ## 标签索引
-- tag: idea titles
+- 标签: 想法标题
 
 ## 灵感条目
-- Title: summary
-  Tags: tag, tag
-  Next: small action
+- 标题: 简述
+  标签: 标签1, 标签2
+  下一步: 具体行动

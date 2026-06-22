@@ -1,27 +1,30 @@
 ---
-name: todo_summary
-description: 汇总用户 Todo，从近期对话中抽取待办事项、状态、优先级和下一步。
-metadata: {"echo":{"emoji":"todo"}}
+name: todo-summary
+description: 从近期对话中抽取用户待办事项，按优先级分组并给出下一步建议
+keywords: [待办, 任务, 清单, 优先级, 下一步, todo]
+version: 1.0.0
 ---
 
 # Todo Summary
 
-Use this skill when the user asks to summarize TODOs, 待办, 任务清单, next actions, or "我还有什么要做".
+## Trigger
+
+当用户询问"我还有什么要做""帮我整理待办""总结一下任务清单"或类似表述时使用这个 Skill。
 
 ## Workflow
 
-1. Call `conversation_digest` with `limit=50`.
-2. Extract actionable items only. Do not turn vague wishes into tasks unless phrased as an intention.
-3. Group by:
-   - Today / soon
-   - Later
-   - Waiting for someone or something
-4. Mark uncertain items with "可能".
+1. 调用 `conversation_digest`，设置 `limit=50` 获取近期上下文。
+2. 只提取明确的待办事项，不把模糊的愿望当成任务。
+3. 按以下分组：
+   - 今天 / 近期
+   - 之后
+   - 等待他人或外部条件
+4. 不确定的项目标注"可能"。
 
 ## Output
 
-Return a concise checklist in Chinese:
+返回简洁的中文清单：
 
-- [ ] Task - context / next step
+- [ ] 任务 — 上下文 / 下一步
 
-If there are no clear TODOs, say no explicit TODO was found and mention the closest candidates.
+如果没有明确待办，如实说明未找到，并列出最接近的候选。

@@ -1,29 +1,32 @@
 ---
-name: web_search_aggregator
-description: 汇总网页结果，对多个网页或搜索结果做去重、来源归纳和结论整理。
-metadata: {"echo":{"emoji":"search"}}
+name: web-search-aggregator
+description: 汇总多个网页或搜索结果，去重、归纳来源并整理结论
+keywords: [搜索, 网页, 汇总, 去重, 来源, search]
+version: 1.0.0
 ---
 
 # Web Search Aggregator
 
-Use this skill when the user asks to search the web, compare pages, summarize search results, or 汇总网页结果.
+## Trigger
+
+当用户需要搜索网页、比较页面、汇总搜索结果，或者说"帮我搜一下""对比这几个网页""汇总搜索结果"时使用这个 Skill。
 
 ## Workflow
 
-1. Clarify the topic if the query is too broad.
-2. Fetch relevant known URLs with `fetch_web_page`.
-3. If the user supplied URLs, fetch those first.
-4. If the user supplied a search query but no URLs, use a search-result webpage endpoint through `fetch_web_page` or a read-only `curl` request, then fetch the most relevant pages.
-5. Deduplicate repeated claims and separate facts from inference.
-6. Prefer primary sources when available.
+1. 如果查询太宽泛，先缩小范围。
+2. 使用 `fetch_web_page` 获取相关 URL 内容。
+3. 如果用户提供了 URL，优先获取这些。
+4. 如果用户提供了搜索词但没有 URL，先通过搜索接口获取结果页，再抓取最相关的页面。
+5. 对重复信息去重，区分事实和推断。
+6. 优先使用一手来源。
 
 ## Output
 
-Use:
+输出四个部分：
 
-1. Short answer
-2. Source-by-source notes
-3. Consensus / disagreement
-4. Links or source names
+1. 简短结论
+2. 各来源要点
+3. 共识与分歧
+4. 来源链接或名称
 
-Mention when network fetches fail or sources are thin.
+网络获取失败或来源薄弱时应注明。
