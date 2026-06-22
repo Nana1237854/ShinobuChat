@@ -8,7 +8,7 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.services.agent_orchestrator import AgentOrchestrator
 from app.services.agent_service import AgentService
 from app.services.agents import AgentCoordinator, ChatAgent, MemoryAgent, RouterAgent, TaskAgent
@@ -60,7 +60,7 @@ def get_agent_service() -> AgentService:
 
 @lru_cache
 def get_tool_registry() -> ToolRegistry:
-    return ToolRegistry(get_skill_registry(), get_http_client())
+    return ToolRegistry(get_skill_registry(), get_http_client(), session_factory=SessionLocal)
 
 
 @lru_cache
@@ -90,8 +90,6 @@ def get_agent_coordinator() -> AgentCoordinator:
         ChatAgent(),
         TaskAgent(get_skill_registry(), get_agent_service(), get_agent_orchestrator()),
         get_memory_agent(),
-        ConfigService(db),
-        SkillManager(db),
     )
 
 

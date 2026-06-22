@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
 import logging
 from dataclasses import dataclass
@@ -48,7 +46,9 @@ CONFIG_SPECS: dict[str, ConfigSpec] = {
 class ConfigService:
     def __init__(self, db: Session):
         self.db = db
-        self._fernet = Fernet(self._fernet_key())
+        key = self._fernet_key()
+        self._fernet = Fernet(key) if key else None
+        self._encryption_available = key is not None
 
     def list_fields(self, user_id: UUID) -> UserConfigOut:
         rows = {
@@ -89,6 +89,12 @@ class ConfigService:
                 continue
             if spec.encrypted and self._looks_masked(value):
                 continue
+            if spec.encrypted and not self._encryption_available:
+                raise ConfigurationError(
+                    f"Cannot save encrypted field '{key}': "
+                    "SC_CONFIG_ENCRYPTION_KEY is not set. "
+                    "Configure a Fernet key in .env to enable saving API keys."
+                )
             serialized = self._serialize(value)
             if spec.encrypted:
                 serialized = self._fernet.encrypt(serialized.encode("utf-8")).decode("ascii")
@@ -140,11 +146,19 @@ class ConfigService:
         return self._mask(value)
 
     def encrypt_value(self, value: str) -> str:
-        """Encrypt a value using Fernet. Returns the encrypted token as string."""
+        """Encrypt a value using Fernet. Raises if key is not available."""
+        if not self._encryption_available:
+            raise ConfigurationError(
+                "Cannot encrypt: SC_CONFIG_ENCRYPTION_KEY is not set."
+            )
         return self._fernet.encrypt(value.encode("utf-8")).decode("ascii")
 
     def decrypt_value(self, token: str) -> str:
         """Decrypt a Fernet token. Raises ConfigurationError on failure."""
+        if not self._encryption_available:
+            raise ConfigurationError(
+                "Cannot decrypt: SC_CONFIG_ENCRYPTION_KEY is not set."
+            )
         try:
             return self._fernet.decrypt(token.encode("ascii")).decode("utf-8")
         except (InvalidToken, ValueError) as exc:
@@ -152,13 +166,17 @@ class ConfigService:
 
     @staticmethod
     def validate_encryption_key() -> None:
-        """Validate the encryption key at startup. Logs warning if unset."""
+        """Validate the encryption key at startup.
+
+        Development: warns if unset, allows startup but blocks encrypted field saves.
+        Production: raises ConfigurationError if key is missing.
+        """
         configured = settings.config_encryption_key.strip()
         if not configured:
             logger.warning(
                 "SC_CONFIG_ENCRYPTION_KEY is not set. "
                 "Encrypted config fields (ai_api_key, google_search_api_key, whisper_api_key) "
-                "will use a key derived from JWT secret. "
+                "cannot be saved until a key is configured. "
                 "Set SC_CONFIG_ENCRYPTION_KEY in .env for production use."
             )
             return
@@ -173,6 +191,8 @@ class ConfigService:
     def _decode_row(self, row: UserConfig) -> Any:
         raw = row.field_value
         if row.encrypted:
+            if not self._encryption_available:
+                return "••••••••"  # Cannot decrypt without key
             try:
                 raw = self._fernet.decrypt(raw.encode("ascii")).decode("utf-8")
             except (InvalidToken, ValueError) as exc:
@@ -181,16 +201,19 @@ class ConfigService:
                 ) from exc
         return self._deserialize(raw, CONFIG_SPECS[row.field_name].value_type)
 
-    def _fernet_key(self) -> bytes:
+    def _fernet_key(self) -> bytes | None:
+        """Return the Fernet key bytes, or None if not configured.
+
+        Never derives from JWT secret — encrypted fields require an explicit key.
+        """
         configured = settings.config_encryption_key.strip()
-        if configured:
-            try:
-                Fernet(configured.encode("ascii"))
-                return configured.encode("ascii")
-            except (ValueError, TypeError) as exc:
-                raise ConfigurationError("SC_CONFIG_ENCRYPTION_KEY is not a valid Fernet key") from exc
-        digest = hashlib.sha256(settings.jwt_secret_key.encode("utf-8")).digest()
-        return base64.urlsafe_b64encode(digest)
+        if not configured:
+            return None
+        try:
+            Fernet(configured.encode("ascii"))
+        except (ValueError, TypeError) as exc:
+            raise ConfigurationError("SC_CONFIG_ENCRYPTION_KEY is not a valid Fernet key") from exc
+        return configured.encode("ascii")
 
     def _serialize(self, value: Any) -> str:
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))

@@ -35,6 +35,9 @@ class SkillRegistry:
     def all(self) -> list[Skill]:
         return list(self._skills.values())
 
+    def all_skill_names(self) -> list[str]:
+        return list(self._skills.keys())
+
     def match(self, content: str) -> list[Skill]:
         normalized = content.lower()
         matches: list[Skill] = []

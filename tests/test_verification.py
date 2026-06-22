@@ -414,16 +414,32 @@ class AgentOrchestratorVerifyStepTests(unittest.TestCase):
             self.ai_client,
         )
 
-    def test_verify_step_returns_verification_result(self):
-        context = ToolContext(history=[])
-        result = self.orchestrator.verify_step("any_tool", "all good", {}, context)
-        self.assertIsInstance(result, VerificationResult)
-        self.assertTrue(result.ok)
+    def test_verify_step_accepts_verified_result(self):
+        """verify_step takes a VerifiedToolResult and logs it (returns None)."""
+        from app.services.tool_registry import VerifiedToolResult
+
+        verified = VerifiedToolResult(
+            output="all good",
+            verified=True,
+            reason="verification passed",
+            checked_fields={"generic_passed": True},
+        )
+        result = self.orchestrator.verify_step("any_tool", verified)
+        self.assertIsNone(result)  # No-op return, verification done by ToolRegistry
 
     def test_verify_step_logs_failure(self):
-        context = ToolContext(history=[])
-        result = self.orchestrator.verify_step("any_tool", "", {}, context)
-        self.assertFalse(result.ok)
+        """verify_step should handle failed verification without raising."""
+        from app.services.tool_registry import VerifiedToolResult
+
+        verified = VerifiedToolResult(
+            output="",
+            verified=False,
+            reason="tool returned an empty result",
+            checked_fields={"result_empty": True},
+        )
+        # Should not raise — just logs
+        result = self.orchestrator.verify_step("any_tool", verified)
+        self.assertIsNone(result)
 
     def test_orchestrator_yields_honest_message_on_verification_failure(self):
         """When verification fails, the orchestrator must not claim completion."""

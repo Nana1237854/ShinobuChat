@@ -81,6 +81,7 @@ class SkillManager:
     def update(self, user_id: UUID, skill_id: UUID, content: str) -> UserSkill:
         skill = self.get(user_id, skill_id)
         parsed = self.parse(content)
+        self._check_builtin_conflict(parsed.name)
         skill.name = parsed.name
         skill.description = parsed.description
         skill.content = parsed.content
@@ -160,12 +161,17 @@ class SkillManager:
             for skill in sorted(skills, key=lambda s: s.name)
         )
 
+    _builtin_names: set[str] | None = None
+
     def _check_builtin_conflict(self, name: str) -> None:
         """Raise ConflictError if the name conflicts with a built-in skill."""
-        from app.services.skill_service import SkillRegistry
+        if SkillManager._builtin_names is None:
+            from app.services.skill_service import SkillRegistry
 
-        builtin = SkillRegistry(Path(__file__).resolve().parents[2] / "skills")
-        if builtin.get(name) is not None:
+            builtin = SkillRegistry(Path(__file__).resolve().parents[2] / "skills")
+            SkillManager._builtin_names = set(builtin.all_skill_names())
+
+        if name in SkillManager._builtin_names:
             raise ConflictError(
                 f"Skill name '{name}' conflicts with a built-in system skill. "
                 "User skills cannot override built-in skills. Choose a different name."

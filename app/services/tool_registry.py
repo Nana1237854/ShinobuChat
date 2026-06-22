@@ -56,9 +56,15 @@ class VerifiedToolResult:
 
 
 class ToolRegistry:
-    def __init__(self, skill_registry: SkillRegistry, http_client: UrllibHttpClient | None = None):
+    def __init__(
+        self,
+        skill_registry: SkillRegistry,
+        http_client: UrllibHttpClient | None = None,
+        session_factory: Callable[[], object] | None = None,
+    ):
         self.skill_registry = skill_registry
         self.http_client = http_client or UrllibHttpClient()
+        self.session_factory = session_factory
         self._tools = {tool.name: tool for tool in self._load_tools()}
 
     def _load_tools(self) -> list[Tool]:
@@ -97,7 +103,9 @@ class ToolRegistry:
         from app.services.tool_verifier import ToolVerifier
 
         output = self.execute(name, arguments, context)
-        verification = ToolVerifier().verify(name, output, arguments, context)
+        verification = ToolVerifier(session_factory=self.session_factory).verify(
+            name, output, arguments, context
+        )
         return VerifiedToolResult(
             output=output,
             verified=verification.passed,

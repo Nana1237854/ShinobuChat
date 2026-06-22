@@ -20,6 +20,9 @@ from app.services.skill_manager import SkillManager
 from app.services.skill_service import Skill, SkillRegistry
 from app.services.tool_registry import ToolContext, ToolRegistry
 
+# Provide a valid Fernet key for tests — encrypted fields require an explicit key.
+TEST_ENCRYPTION_KEY = "qd1FW1RJNh0m3Di-wyg0qBNHls20FePZsWQ-LGJ83B0="
+
 
 VALID_SKILL = """---
 name: focus-review
@@ -39,6 +42,12 @@ class ConfigAndSkillServiceTests(unittest.TestCase):
         Base.metadata.create_all(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine, future=True)
         self.user_id = uuid.uuid4()
+        # Ensure encryption key is available for encrypted field tests
+        self._encryption_patch = patch(
+            "app.services.config_service.settings.config_encryption_key",
+            TEST_ENCRYPTION_KEY,
+        )
+        self._encryption_patch.start()
         with self.Session() as db:
             db.add(
                 User(
@@ -51,6 +60,7 @@ class ConfigAndSkillServiceTests(unittest.TestCase):
             db.commit()
 
     def tearDown(self):
+        self._encryption_patch.stop()
         Base.metadata.drop_all(bind=self.engine)
 
     def test_api_key_is_encrypted_and_only_masked_in_public_output(self):
@@ -175,6 +185,11 @@ class UserConfigFullCoverageTests(unittest.TestCase):
         Base.metadata.create_all(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine, future=True)
         self.user_id = uuid.uuid4()
+        self._encryption_patch = patch(
+            "app.services.config_service.settings.config_encryption_key",
+            TEST_ENCRYPTION_KEY,
+        )
+        self._encryption_patch.start()
         with self.Session() as db:
             db.add(
                 User(
@@ -187,6 +202,7 @@ class UserConfigFullCoverageTests(unittest.TestCase):
             db.commit()
 
     def tearDown(self):
+        self._encryption_patch.stop()
         Base.metadata.drop_all(bind=self.engine)
 
     def _service(self, db=None) -> ConfigService:
@@ -555,7 +571,8 @@ class UserConfigFullCoverageTests(unittest.TestCase):
     # --- Encryption key validation ---
 
     def test_validate_encryption_key_warns_when_unset(self):
-        # When key is empty (as in test), should log warning but not raise
+        # Temporarily stop the setUp patch to test the "key not set" path
+        self._encryption_patch.stop()
         try:
             with self.assertLogs("app.services.config_service", level="WARNING") as cm:
                 ConfigService.validate_encryption_key()
@@ -565,6 +582,8 @@ class UserConfigFullCoverageTests(unittest.TestCase):
             )
         except Exception:
             self.fail("validate_encryption_key should not raise when key is unset")
+        finally:
+            self._encryption_patch.start()
 
     @patch("app.services.config_service.settings")
     def test_validate_encryption_key_raises_for_invalid_key(self, mock_settings):

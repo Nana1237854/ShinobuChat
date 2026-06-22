@@ -11,7 +11,7 @@ from app.services.ai_client import AIClient
 from app.services.skill_service import Skill
 from app.services.stream_events import StreamEvent
 from app.services.tool_registry import ToolContext, ToolRegistry
-from app.services.tool_verifier import ToolVerifier, VerificationResult
+from app.services.tool_registry import VerifiedToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -30,26 +30,27 @@ class AgentOrchestrator:
     def verify_step(
         self,
         tool_name: str,
-        result: str,
-        arguments: dict,
-        context: ToolContext,
-    ) -> VerificationResult:
-        verification = ToolVerifier().verify(tool_name, result, arguments, context)
+        verified: VerifiedToolResult,
+    ) -> None:
+        """Log verification result and yield honest failure message if needed.
+
+        Verification is performed by ToolRegistry.execute_verified — this method
+        only handles logging and user-facing messaging.
+        """
         logger.info(
             "verify_step tool=%s ok=%s reason=%s checked_fields=%s",
             tool_name,
-            verification.ok,
-            verification.reason,
-            verification.checked_fields,
+            verified.verified,
+            verified.reason,
+            verified.checked_fields,
         )
-        if not verification.ok:
+        if not verified.verified:
             logger.warning(
                 "Tool verification failed for %s: %s (checked: %s)",
                 tool_name,
-                verification.reason,
-                verification.checked_fields,
+                verified.reason,
+                verified.checked_fields,
             )
-        return verification
 
     def run(
         self,
@@ -109,8 +110,8 @@ class AgentOrchestrator:
                 )
                 result = self.tool_registry.execute_verified(tool_name, arguments, context)
 
-                # Run verify_step for mechanical verification record
-                verification = self.verify_step(tool_name, result.output, arguments, context)
+                # Log and handle verification result (single verification path)
+                self.verify_step(tool_name, result)
 
                 if not result.verified:
                     yield StreamEvent(
