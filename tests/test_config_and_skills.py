@@ -1139,6 +1139,18 @@ class SkillMarketTests(unittest.TestCase):
 
         self.assertIsNone(_find_market_skill("nonexistent-skill-xyz"))
 
+    def test_market_list_does_not_return_content(self):
+        """Market list must not leak full SKILL.md content."""
+        from app.api.v1.routes.skill_market import list_market_skills
+
+        items = list_market_skills()
+        self.assertGreater(len(items), 0)
+        for item in items:
+            self.assertFalse(
+                hasattr(item, "content"),
+                f"MarketSkillOut must not expose 'content' field for {item.name}",
+            )
+
     def test_market_skill_has_required_fields(self):
         from app.api.v1.routes.skill_market import _load_market
 
