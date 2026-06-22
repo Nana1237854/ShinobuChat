@@ -138,6 +138,8 @@ class SkillManager:
             raise BadRequestError(f"Failed to fetch skill from URL: {exc}") from exc
 
         content = response.body.decode("utf-8", errors="replace")
+        if len(content) > 100_000:
+            raise BadRequestError("Skill file is too large")
         return self.install_text(user_id, content, installed_from="url", source_url=url)
 
     def install_from_file(self, user_id: UUID, file_bytes: bytes, filename: str = "") -> UserSkill:

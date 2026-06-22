@@ -74,3 +74,27 @@ export function installMarketSkill(
     accessToken,
   });
 }
+
+export function installSkillFromUrl(
+  accessToken: string,
+  url: string,
+): Promise<SkillDetail> {
+  return requestJson<SkillDetail>('/skills/user/me/from-url', {
+    method: 'POST',
+    accessToken,
+    body: { url },
+  });
+}
+
+export function installSkillFromFile(
+  accessToken: string,
+  file: File,
+): Promise<SkillDetail> {
+  const body = new FormData();
+  body.append('file', file);
+  return requestJson<SkillDetail>('/skills/user/me/from-file', {
+    method: 'POST',
+    accessToken,
+    body,
+  });
+}

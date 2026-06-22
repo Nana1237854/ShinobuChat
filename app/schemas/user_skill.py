@@ -10,6 +10,10 @@ class UserSkillCreate(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
 
 
+class SkillInstallFromUrl(BaseModel):
+    url: str = Field(min_length=1, max_length=2048)
+
+
 class UserSkillUpdate(BaseModel):
     content: str = Field(min_length=1, max_length=100_000)
 

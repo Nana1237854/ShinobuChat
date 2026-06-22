@@ -1,9 +1,11 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 
 from app.api.deps import get_current_user_id, get_skill_manager
+from app.core.exceptions import BadRequestError
 from app.schemas.user_skill import (
+    SkillInstallFromUrl,
     UserSkillCreate,
     UserSkillDetailOut,
     UserSkillPatch,
@@ -32,6 +34,29 @@ def install_user_skill(
     service: SkillManager = Depends(get_skill_manager),
 ) -> UserSkillDetailOut:
     skill = service.install_text(user_id, payload.content)
+    return UserSkillDetailOut.model_validate(skill)
+
+
+@router.post("/from-url", response_model=UserSkillDetailOut, status_code=status.HTTP_201_CREATED)
+def install_skill_from_url(
+    payload: SkillInstallFromUrl,
+    user_id: UUID = Depends(get_current_user_id),
+    service: SkillManager = Depends(get_skill_manager),
+) -> UserSkillDetailOut:
+    skill = service.install_from_url(user_id, payload.url)
+    return UserSkillDetailOut.model_validate(skill)
+
+
+@router.post("/from-file", response_model=UserSkillDetailOut, status_code=status.HTTP_201_CREATED)
+async def install_skill_from_file(
+    file: UploadFile = File(...),
+    user_id: UUID = Depends(get_current_user_id),
+    service: SkillManager = Depends(get_skill_manager),
+) -> UserSkillDetailOut:
+    content_bytes = await file.read()
+    if len(content_bytes) > 100_000:
+        raise BadRequestError("Skill file is too large")
+    skill = service.install_from_file(user_id, content_bytes, file.filename or "")
     return UserSkillDetailOut.model_validate(skill)
 
 

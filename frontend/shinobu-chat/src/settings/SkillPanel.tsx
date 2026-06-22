@@ -4,7 +4,9 @@ import {
   deleteSkill,
   getSkillDetail,
   installMarketSkill,
+  installSkillFromFile,
   installSkillFromText,
+  installSkillFromUrl,
   listSkillMarket,
   listUserSkills,
   toggleSkill,
@@ -55,6 +57,7 @@ export function SkillPanel({ accessToken }: SkillPanelProps) {
   const [marketSkills, setMarketSkills] = useState<MarketSkill[]>([]);
   const [editorDraft, setEditorDraft] = useState<SkillDetailDraft | null>(null);
   const [markdownContent, setMarkdownContent] = useState(starterSkill);
+  const [githubUrl, setGithubUrl] = useState('');
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading');
   const [marketState, setMarketState] = useState<'idle' | 'loading' | 'ready' | 'empty' | 'error'>('idle');
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -292,16 +295,68 @@ export function SkillPanel({ accessToken }: SkillPanelProps) {
             ) : null}
 
             {installTab === 'github' ? (
-              <div className="skill-install-placeholder">
-                <h3>GitHub URL 安装即将支持</h3>
-                <p>当前前端保留了入口，但后端尚未提供对应安装流。需要后端配合后再打开真实提交。</p>
+              <div className="skill-install-card">
+                <div className="skill-install-copy">
+                  <h3>从 URL 安装</h3>
+                  <p>输入可直接访问 SKILL.md 文本内容的 URL，例如 GitHub raw URL。</p>
+                </div>
+                <input
+                  type="url"
+                  value={githubUrl}
+                  onChange={e => setGithubUrl(e.target.value)}
+                  placeholder="https://raw.githubusercontent.com/..."
+                  aria-label="SKILL.md 原始 URL"
+                />
+                <div className="skill-install-actions">
+                  <button
+                    type="button"
+                    className="settings-primary-button"
+                    onClick={async () => {
+                      if (!githubUrl.trim()) { setError('请输入有效的 URL'); return; }
+                      setBusyKey('install-url');
+                      setError(null); setNotice(null);
+                      try {
+                        await installSkillFromUrl(accessToken, githubUrl.trim());
+                        await refreshSkills();
+                        setNotice('已从 URL 安装 Skill');
+                        setGithubUrl('');
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : 'URL 安装失败');
+                      } finally { setBusyKey(null); }
+                    }}
+                    disabled={busyKey === 'install-url'}
+                  >
+                    <Download size={15} />{busyKey === 'install-url' ? '安装中' : '安装'}
+                  </button>
+                </div>
               </div>
             ) : null}
 
             {installTab === 'upload' ? (
-              <div className="skill-install-placeholder">
-                <h3>上传 `.md` 文件即将支持</h3>
-                <p>当前阶段不做假上传逻辑。后端开放文件导入接口后，这里再接真实能力。</p>
+              <div className="skill-install-card">
+                <div className="skill-install-copy">
+                  <h3>上传 SKILL.md 文件</h3>
+                  <p>选择本地的 .md 文件，必须是 UTF-8 编码且包含合法的 YAML frontmatter。</p>
+                </div>
+                <input
+                  type="file"
+                  accept=".md,.txt,text/markdown"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setBusyKey('install-file');
+                    setError(null); setNotice(null);
+                    try {
+                      await installSkillFromFile(accessToken, file);
+                      await refreshSkills();
+                      setNotice('已从文件安装 Skill');
+                      e.target.value = '';
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : '文件安装失败');
+                    } finally { setBusyKey(null); }
+                  }}
+                  aria-label="选择 SKILL.md 文件"
+                />
               </div>
             ) : null}
           </div>

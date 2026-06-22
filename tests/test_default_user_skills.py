@@ -174,5 +174,92 @@ class DefaultSkillSeedTests(unittest.TestCase):
             self.assertEqual(created[0].name, "gentle-daily-checkin")
 
 
+class SkillInstallUrlAndFileTests(unittest.TestCase):
+    def setUp(self):
+        self.engine = create_engine("sqlite:///:memory:", future=True)
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine, future=True)
+        self.user_id = uuid.uuid4()
+        with self.Session() as db:
+            db.add(User(id=self.user_id, email="install@example.com", hashed_password="x", display_name="Install"))
+            db.commit()
+
+    def tearDown(self):
+        Base.metadata.drop_all(bind=self.engine)
+
+    def _manager(self):
+        return SkillManager(self.Session())
+
+    # ── URL install ──────────────────────────────────────────────
+
+    def test_install_from_url_rejects_invalid_scheme(self):
+        from app.core.exceptions import BadRequestError
+
+        mgr = self._manager()
+        with self.assertRaises(BadRequestError):
+            mgr.install_from_url(self.user_id, "ftp://example.com/skill.md")
+
+    def test_install_from_url_rejects_missing_frontmatter(self):
+        from app.core.exceptions import BadRequestError
+
+        class FakeResponse:
+            body = b"no frontmatter here"
+        fake_client = type("FakeClient", (), {
+            "request_bytes": lambda self, url, timeout: FakeResponse()
+        })()
+
+        mgr = self._manager()
+        with patch("app.services.http_client.UrllibHttpClient", return_value=fake_client):
+            with self.assertRaises(BadRequestError):
+                mgr.install_from_url(self.user_id, "https://example.com/skill.md")
+
+    def test_install_from_url_success(self):
+        class FakeResponse:
+            body = SEED_SKILL.encode("utf-8")
+        fake_client = type("FakeClient", (), {
+            "request_bytes": lambda self, url, timeout: FakeResponse()
+        })()
+
+        mgr = self._manager()
+        with patch("app.services.http_client.UrllibHttpClient", return_value=fake_client):
+            skill = mgr.install_from_url(self.user_id, "https://example.com/skill.md")
+
+        self.assertEqual(skill.installed_from, "url")
+        self.assertEqual(skill.source_url, "https://example.com/skill.md")
+        self.assertTrue(skill.enabled)
+
+    def test_install_from_url_rejects_oversize(self):
+        from app.core.exceptions import BadRequestError
+
+        class FakeResponse:
+            body = b"#" * 200_000
+        fake_client = type("FakeClient", (), {
+            "request_bytes": lambda self, url, timeout: FakeResponse()
+        })()
+
+        mgr = self._manager()
+        with patch("app.services.http_client.UrllibHttpClient", return_value=fake_client):
+            with self.assertRaises(BadRequestError):
+                mgr.install_from_url(self.user_id, "https://example.com/skill.md")
+
+    # ── File install ─────────────────────────────────────────────
+
+    def test_install_from_file_rejects_non_utf8(self):
+        from app.core.exceptions import BadRequestError
+
+        mgr = self._manager()
+        gbk_bytes = "你好世界".encode("gbk")
+        with self.assertRaises(BadRequestError):
+            mgr.install_from_file(self.user_id, gbk_bytes, "skill.md")
+
+    def test_install_from_file_success(self):
+        mgr = self._manager()
+        skill = mgr.install_from_file(self.user_id, SEED_SKILL.encode("utf-8"), "skill.md")
+
+        self.assertEqual(skill.installed_from, "file")
+        self.assertIsNone(skill.source_url)
+        self.assertTrue(skill.enabled)
+        self.assertEqual(skill.name, "gentle-daily-checkin")
+
 if __name__ == "__main__":
     unittest.main()
