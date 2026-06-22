@@ -30,3 +30,9 @@ class UserConfigFieldOut(BaseModel):
 
 class UserConfigOut(BaseModel):
     fields: list[UserConfigFieldOut]
+
+
+# Type aliases matching the user-facing naming convention
+ConfigFieldOut = UserConfigFieldOut
+ConfigUpdateRequest = UserConfigPatch
+ConfigListResponse = UserConfigOut

@@ -32,6 +32,9 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def startup_event() -> None:
+        from app.services.config_service import ConfigService
+
+        ConfigService.validate_encryption_key()
         init_db()
 
     @app.get("/health", tags=["health"])
