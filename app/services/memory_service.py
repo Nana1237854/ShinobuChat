@@ -54,7 +54,7 @@ class MemoryService:
         self.embedding_service = embedding_service
         self.ai_client = ai_client
         self.session_factory = session_factory
-        self.enabled = settings.memory_pgvector_enabled if enabled is None else enabled
+        self.enabled = settings.memory_enabled if enabled is None else enabled
         self.max_results = max_results or settings.memory_max_results
 
     def store_memory(
@@ -97,6 +97,7 @@ class MemoryService:
         query: str,
         *,
         top_k: int | None = None,
+        include_archived: bool = False,
     ) -> list[Memory]:
         if not self.enabled:
             return []
@@ -108,15 +109,18 @@ class MemoryService:
         limit = max(top_k or self.max_results, 1)
         with self.session_factory() as db:
             if self._can_use_pgvector(db):
+                query = db.query(Memory).filter(Memory.user_id == user_id)
+                if not include_archived:
+                    query = query.filter(Memory.archived.is_(False))
                 memories = (
-                    db.query(Memory)
-                    .filter(Memory.user_id == user_id)
-                    .order_by(Memory.embedding.cosine_distance(query_embedding))
+                    query.order_by(Memory.embedding.cosine_distance(query_embedding))
                     .limit(limit)
                     .all()
                 )
             else:
                 candidates = db.query(Memory).filter(Memory.user_id == user_id).all()
+                if not include_archived:
+                    candidates = [c for c in candidates if not c.archived]
                 memories = sorted(
                     candidates,
                     key=lambda memory: self._cosine_distance(query_embedding, self._as_vector(memory.embedding)),
@@ -208,8 +212,8 @@ class MemoryService:
 
     # ---- CRUD methods for routes ----
 
-    def create(self, payload) -> Memory:
-        """Create a memory from MemoryCreate schema."""
+    def create(self, user_id, payload) -> Memory:
+        """Create a memory from MemoryCreate schema. user_id from JWT, not payload."""
         from app.models.memory import Memory as MemoryModel
 
         embedding = None
@@ -221,7 +225,7 @@ class MemoryService:
             embedding = [0.0] * settings.memory_embedding_dimensions
 
         memory = MemoryModel(
-            user_id=payload.user_id,
+            user_id=user_id,
             category=payload.category.value if hasattr(payload.category, 'value') else str(payload.category),
             title=payload.title,
             content=payload.content,
@@ -264,18 +268,16 @@ class MemoryService:
         from app.schemas.memory import MemoryOut, MemorySearchHit
 
         results: list = []
-        with self.session_factory() as db:
-            for mem in embeddings:
-                if payload.category and mem.category != (payload.category.value if hasattr(payload.category, 'value') else payload.category):
-                    continue
-                if payload.include_archived is False and mem.archived:
-                    continue
-                db.expunge(mem)
-                results.append(MemorySearchHit(
-                    memory=MemoryOut.model_validate(mem),
-                    similarity=0.0,
-                    distance=0.0,
-                ))
+        for mem in embeddings:
+            if payload.category and mem.category != (payload.category.value if hasattr(payload.category, 'value') else payload.category):
+                continue
+            if payload.include_archived is False and mem.archived:
+                continue
+            results.append(MemorySearchHit(
+                memory=MemoryOut.model_validate(mem),
+                similarity=0.0,
+                distance=0.0,
+            ))
         return results[:payload.limit]
 
     def update(self, memory_id, user_id, payload) -> Memory:
@@ -318,7 +320,10 @@ class MemoryService:
         with self.session_factory() as db:
             pref = db.query(MemoryPreference).filter(MemoryPreference.user_id == user_id).first()
             if pref is None:
-                return MemoryPreference(user_id=user_id, enabled=True)
+                pref = MemoryPreference(user_id=user_id, enabled=True)
+                db.add(pref)
+                db.commit()
+                db.refresh(pref)
             db.expunge(pref)
             return pref
 
@@ -365,11 +370,16 @@ class MemoryService:
             if mem.source_msg_id is None:
                 return SimpleMemoryContext(memory_id=mem.id, source_msg_id=None, conversation_id=None, messages=[], detail="source context unavailable")
 
+            from app.models.conversation import Conversation
             from app.models.message import Message
 
             source_msg = db.query(Message).filter(Message.id == mem.source_msg_id).first()
             if source_msg is None:
                 return SimpleMemoryContext(memory_id=mem.id, source_msg_id=mem.source_msg_id, conversation_id=None, messages=[], detail="source message not found")
+
+            conv = db.query(Conversation).filter(Conversation.id == source_msg.conversation_id).first()
+            if conv is None or conv.user_id != user_id:
+                return SimpleMemoryContext(memory_id=mem.id, source_msg_id=mem.source_msg_id, conversation_id=None, messages=[], detail="source context unavailable")
 
             conversation_id = source_msg.conversation_id
             before = (

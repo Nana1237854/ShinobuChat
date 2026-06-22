@@ -65,7 +65,7 @@ def create_memory(
     user_id: UUID = Depends(get_current_user_id),
     memory_service: MemoryService = Depends(get_memory_service),
 ) -> MemoryOut:
-    return MemoryOut.model_validate(memory_service.create(payload))
+    return MemoryOut.model_validate(memory_service.create(user_id, payload))
 
 
 @router.get("/user/me", response_model=list[MemoryOut])

@@ -14,7 +14,7 @@ class MemoryCategory(str, Enum):
 
 
 class MemoryCreate(BaseModel):
-    user_id: UUID
+    user_id: UUID | None = None
     category: MemoryCategory = MemoryCategory.LONG_TERM
     title: str = Field(min_length=1, max_length=120)
     content: str = Field(min_length=1, max_length=4000)
