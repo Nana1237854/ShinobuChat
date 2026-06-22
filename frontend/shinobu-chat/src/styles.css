@@ -29,11 +29,22 @@ textarea {
 button {
   border: 0;
   cursor: pointer;
+  transition: transform 100ms ease, background-color 150ms ease;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 button:disabled {
   cursor: not-allowed;
   opacity: 0.48;
+}
+
+:focus-visible {
+  outline: 2px solid #2f67df;
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 .auth-screen,
@@ -316,8 +327,8 @@ button:disabled {
 }
 
 .icon-button {
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
