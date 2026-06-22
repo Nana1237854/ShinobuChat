@@ -12,6 +12,7 @@ from app.services.agents.router_agent import RouterAgent, RouterDecision
 from app.services.agents.task_agent import TaskAgent
 from app.services.skill_service import Skill
 from app.services.stream_events import StreamEvent
+from app.services.user_emotion_service import UserEmotionService
 
 
 @dataclass(frozen=True)
@@ -30,11 +31,13 @@ class AgentCoordinator:
         chat_agent: ChatAgent,
         task_agent: TaskAgent,
         memory_agent: MemoryAgent,
+        user_emotion_service: UserEmotionService | None = None,
     ):
         self.router_agent = router_agent
         self.chat_agent = chat_agent
         self.task_agent = task_agent
         self.memory_agent = memory_agent
+        self.user_emotion_service = user_emotion_service
 
     def prepare(
         self,
@@ -52,6 +55,12 @@ class AgentCoordinator:
         persona_context = self._persona_tone_context(user_id)
         if persona_context:
             memory_context = [persona_context, *memory_context]
+
+        # User emotion perception — temporary turn-level hint, NOT persisted
+        if self.user_emotion_service is not None:
+            emotion_context = self._user_emotion_context(content, history)
+            if emotion_context:
+                memory_context = [emotion_context, *memory_context]
 
         # Goal candidate detection — prompt to ask, never auto-create
         from app.services.goal_service import GoalService
@@ -135,6 +144,19 @@ class AgentCoordinator:
                 db.close()
         except Exception:
             return ""
+
+    def _user_emotion_context(self, content: str, history: list[Message]) -> str:
+        recent = [
+            m.content for m in history
+            if getattr(m, "role", None) == "user"
+        ][-5:]
+        result = self.user_emotion_service.analyze(
+            user_message=content,
+            recent_user_messages=recent,
+        )
+        if result.should_adjust_reply and result.reply_style_hint:
+            return f"【用户当前情绪回应提示】\n{result.reply_style_hint}"
+        return ""
 
     def _detect_agent_continuation(self, content: str, history: list[Message]) -> RouterDecision | None:
         text = content.strip()

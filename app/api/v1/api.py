@@ -5,6 +5,7 @@ from app.api.v1.routes import (
     characters,
     conversations,
     config,
+    emotion,
     goals,
     live2d,
     memories,
@@ -27,6 +28,7 @@ api_router.include_router(skills.router)
 api_router.include_router(skill_market.router)
 api_router.include_router(persona.router)
 api_router.include_router(goals.router)
+api_router.include_router(emotion.router)
 api_router.include_router(conversations.router)
 api_router.include_router(messages.router)
 api_router.include_router(memories.router)

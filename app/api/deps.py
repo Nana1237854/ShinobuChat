@@ -30,6 +30,7 @@ from app.services.skill_service import SkillRegistry
 from app.services.stream_events import SseEncoder
 from app.services.sync_service import SyncService
 from app.services.goal_service import GoalService
+from app.services.user_emotion_service import UserEmotionService
 from app.services.persona_settings_service import PersonaSettingsService
 from app.services.reminder_scheduler_service import ReminderSchedulerService
 from app.services.todo_service import TodoService
@@ -87,12 +88,18 @@ def get_memory_agent() -> MemoryAgent:
 
 
 @lru_cache
+def get_user_emotion_service() -> UserEmotionService:
+    return UserEmotionService()
+
+
+@lru_cache
 def get_agent_coordinator() -> AgentCoordinator:
     return AgentCoordinator(
         RouterAgent(),
         ChatAgent(),
         TaskAgent(get_skill_registry(), get_agent_service(), get_agent_orchestrator()),
         get_memory_agent(),
+        get_user_emotion_service(),
     )
 
 
