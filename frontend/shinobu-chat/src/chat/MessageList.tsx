@@ -63,8 +63,8 @@ export function MessageList({ messages }: MessageListProps) {
     return (
       <div className="message-list" ref={listRef}>
         <div className="welcome-card">
-          <h2>What would you like to talk about with Shinobu today?</h2>
-          <p>Send Shinobu a message and she will stay with you through the live reply stream.</p>
+          <h2>今天想和 Shinobu 聊些什么？</h2>
+          <p>发送消息，Shinobu 会通过实时回复陪伴在你身边。</p>
         </div>
       </div>
     );
