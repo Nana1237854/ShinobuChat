@@ -9,6 +9,7 @@ import {
   MoreHorizontal,
   Music2,
   PanelLeft,
+  SunMoon,
   RefreshCw,
   Search,
   Settings,
@@ -27,6 +28,8 @@ import { MusicPlayer } from './media/MusicPlayer';
 import { SettingsPage, type SettingsTab } from './settings/SettingsPage';
 import { ReminderBubble } from './reminders/ReminderBubble';
 import { getDueReminders, dismissReminder, snoozeReminder } from './api/reminders';
+import { getConversationMode } from './api/modes';
+import { analyzeImage } from './api/vision';
 import { listGoals } from './api/goals';
 import { subscribeReminderEvents } from './realtime/sseClient';
 import { captureScreen } from './media/screenshot';
@@ -49,6 +52,7 @@ import {
   loadPetSettings,
   savePetSettings,
 } from './live2d/settings';
+import { getModePlaceholder, getModeStatusLabel } from './modes/ModeSwitch';
 import type {
   ApiMessage,
   AuthSession,
@@ -56,6 +60,7 @@ import type {
   BackgroundItem,
   ChatMessage,
   Conversation,
+  ConversationMode,
   EmotionState,
   GoalItem,
   Live2DModelItem,
@@ -63,6 +68,7 @@ import type {
   PetSettings,
   ReminderEvent,
   RouteMode,
+  VisionAnalyzeResponse,
 } from './types';
 
 const SESSION_KEY = 'shinobu-auth-session';
@@ -108,6 +114,7 @@ export default function App() {
   const [conversationId, setConversationId] = useState<string | null>(() => localStorage.getItem('shinobu-conversation-id'));
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [routeMode, setRouteMode] = useState<RouteMode>(() => (localStorage.getItem('shinobu-route-mode') as RouteMode) || 'auto');
+  const [conversationMode, setConversationMode] = useState<ConversationMode | null>(null);
   const [streaming, setStreaming] = useState(false);
   const streamingRef = useRef(streaming);
   const [status, setStatus] = useState('Ready');
@@ -297,6 +304,16 @@ export default function App() {
   }, [refreshGoalPreview]);
 
   useEffect(() => {
+    if (!session) {
+      setConversationMode(null);
+      return;
+    }
+    getConversationMode(session.accessToken)
+      .then(settings => setConversationMode(settings.mode))
+      .catch(() => setConversationMode(null));
+  }, [session]);
+
+  useEffect(() => {
     if (!session || !conversationId) {
       setMessages([]);
       return;
@@ -484,13 +501,95 @@ export default function App() {
     }
   };
 
-  const sendText = async (text: string) => {
+  const formatVisionResponse = (result: VisionAnalyzeResponse): string => {
+    const lines: string[] = [];
+    lines.push(result.summary);
+    if (result.text_in_image) {
+      lines.push('');
+      lines.push('── 识别到的文字 ──');
+      lines.push(result.text_in_image);
+    }
+    if (result.scene) {
+      lines.push('');
+      lines.push(`场景: ${result.scene}`);
+    }
+    if (result.objects.length > 0) {
+      lines.push(`识别到的物体: ${result.objects.join('、')}`);
+    }
+    const confidence = result.confidence?.score ?? 0;
+    if (confidence < 0.6) {
+      lines.push('');
+      lines.push('（识别置信度较低，吾可能看错了）');
+    }
+    return lines.join('\n');
+  };
+
+  const sendText = async (text: string, imageFile?: File) => {
     if (!session || streaming) return;
-    const content = text.trim();
-    if (!content) return;
     setStreaming(true);
     setError(null);
     setEmotionState(null);
+
+    if (imageFile) {
+      const imageUrl = URL.createObjectURL(imageFile);
+      const userMsgId = `user-img-${Date.now()}`;
+      const assistantMsgId = `vision-${Date.now()}`;
+      const question = text.trim() || '请描述这张图片';
+
+      setMessages(current => [
+        ...current,
+        {
+          id: userMsgId,
+          conversation_id: conversationId || 'pending',
+          role: 'user',
+          content: question,
+          created_at: new Date().toISOString(),
+          status: 'sending',
+          image_preview_url: imageUrl,
+        },
+        {
+          id: assistantMsgId,
+          conversation_id: conversationId || 'pending',
+          role: 'assistant',
+          content: '正在看图...',
+          created_at: new Date().toISOString(),
+          status: 'streaming',
+        },
+      ]);
+
+      setStatus('正在看图...');
+
+      try {
+        const result = await analyzeImage(session.accessToken, imageFile, question || null);
+        URL.revokeObjectURL(imageUrl);
+        setMessages(current =>
+          current.map(item => {
+            if (item.id === userMsgId) return { ...item, status: 'sent' as const, image_preview_url: imageUrl };
+            if (item.id === assistantMsgId) return { ...item, content: formatVisionResponse(result), status: 'sent' as const };
+            return item;
+          }),
+        );
+        setStatus('Ready');
+        notify('图片分析完成');
+      } catch (nextError) {
+        URL.revokeObjectURL(imageUrl);
+        const message = nextError instanceof Error ? nextError.message : '图片分析失败';
+        setMessages(current =>
+          current.map(item => {
+            if (item.id === userMsgId) return { ...item, status: 'failed' as const };
+            if (item.id === assistantMsgId) return { ...item, content: `图片分析失败：${message}`, status: 'failed' as const };
+            return item;
+          }),
+        );
+        setStatus('图片分析失败');
+      } finally {
+        setStreaming(false);
+      }
+      return;
+    }
+
+    const content = text.trim();
+    if (!content) { setStreaming(false); return; }
     setStatus('Shinobu is replying...');
 
     let pendingId = `pending-${Date.now()}`;
@@ -776,6 +875,7 @@ export default function App() {
             petSettings={petSettings}
             models={models}
             backgrounds={backgrounds}
+            conversationMode={conversationMode}
             onPetSettingsChange={setPetSettings}
             onRefreshModels={() => {
               reloadAssets().catch(nextError => {
@@ -783,6 +883,7 @@ export default function App() {
               });
             }}
             onGoalsChanged={refreshGoalPreview}
+            onModeChange={setConversationMode}
             onClose={() => setSettingsOpen(false)}
           />
         ) : null}
@@ -819,7 +920,7 @@ export default function App() {
             <span className="chat-avatar"><Bot size={20} /></span>
             <div>
               <h1>Shinobu</h1>
-              <p><span className="online-dot" />在线 · {status}</p>
+              <p><span className="online-dot" />在线 · {status}{conversationMode ? <span className="mode-chip">{getModeStatusLabel(conversationMode)}</span> : null}</p>
             </div>
           </div>
           <div className="chat-header-actions">
@@ -832,10 +933,20 @@ export default function App() {
         {error ? <div className="error-banner">{error}</div> : null}
 
         <section className="conversation-pane">
+          {conversationMode === 'work' ? (
+            <div className="mode-hint-banner">工作模式：优先结构化回复</div>
+          ) : null}
+          {conversationMode === 'focus' ? (
+            <div className="mode-hint-banner mode-hint-focus">专注模式：已减少非必要提示</div>
+          ) : null}
+          {conversationMode === 'night' ? (
+            <div className="mode-hint-banner mode-hint-night">夜间模式：回复更轻柔，减少打扰</div>
+          ) : null}
           <MessageList messages={messages} />
           <Composer
             disabled={streaming}
             routeMode={routeMode}
+            conversationMode={conversationMode}
             galgameMode={galgameMode}
             onRouteModeChange={setRouteMode}
             onGalgameModeChange={setGalgameMode}

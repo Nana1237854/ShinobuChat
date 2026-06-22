@@ -1172,6 +1172,85 @@ button:disabled {
   text-align: center;
 }
 
+.composer-image-error {
+  padding: 7px 12px;
+  border-radius: 8px;
+  color: var(--color-error);
+  background: rgba(244, 63, 94, 0.1);
+  font-size: 0.76rem;
+}
+
+.composer-image-preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border: 1px solid rgba(91, 111, 145, 0.14);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.composer-image-preview img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex: 0 0 auto;
+}
+
+.composer-image-meta {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.composer-image-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+}
+
+.composer-image-meta small {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+}
+
+.composer-image-remove {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1.5px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.composer-image-remove:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.message-image-preview {
+  margin-bottom: 8px;
+}
+
+.message-image-preview img {
+  max-width: 240px;
+  max-height: 240px;
+  width: auto;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid rgba(91, 111, 145, 0.1);
+  display: block;
+}
+
 .galgame-options {
   display: grid;
   gap: 6px;
@@ -2654,5 +2733,135 @@ button:disabled {
     left: 10px;
     top: 10px;
     width: min(100%, calc(100% - 20px));
+  }
+}
+
+/* ==========================================
+   9. Mode switch
+   ========================================== */
+
+.mode-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: #36559f;
+  background: var(--color-primary-soft);
+  font-size: 0.64rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.mode-hint-banner {
+  flex: 0 0 auto;
+  margin: 0 12px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  color: #36559f;
+  background: var(--color-primary-soft);
+  font-size: 0.76rem;
+  font-weight: 650;
+  text-align: center;
+}
+
+.mode-hint-banner.mode-hint-focus {
+  color: #9a6700;
+  background: var(--color-warning-soft);
+}
+
+.mode-hint-banner.mode-hint-night {
+  color: #5d4ba8;
+  background: rgba(139, 122, 220, 0.1);
+}
+
+.mode-switch {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.mode-switch-title {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 1rem;
+}
+
+.mode-switch-subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.mode-switch-error {
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--color-error);
+  background: rgba(244, 63, 94, 0.1);
+  font-size: 0.78rem;
+}
+
+.mode-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3);
+}
+
+.mode-option {
+  min-height: 100px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: var(--space-5);
+  border: 1px solid rgba(91, 111, 145, 0.14);
+  border-radius: 12px;
+  color: #425066;
+  background: #f8f9fc;
+  text-align: left;
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.mode-option:hover:not(:disabled) {
+  border-color: rgba(81, 111, 195, 0.22);
+  background: #fff;
+}
+
+.mode-option.is-active {
+  border-color: rgba(81, 111, 195, 0.34);
+  background: var(--color-primary-soft);
+  box-shadow: 0 10px 24px rgba(81, 111, 195, 0.12);
+}
+
+.mode-option.is-switching {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.mode-option strong {
+  color: var(--color-text-secondary);
+  font-size: 0.92rem;
+}
+
+.mode-option.is-active strong {
+  color: #294a9b;
+}
+
+.mode-option span {
+  color: #748096;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.mode-option.is-active span {
+  color: #516fc3;
+}
+
+@media (max-width: 560px) {
+  .mode-options {
+    grid-template-columns: 1fr;
+  }
+
+  .mode-option {
+    min-height: auto;
   }
 }

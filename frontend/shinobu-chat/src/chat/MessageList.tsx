@@ -83,6 +83,11 @@ export function MessageList({ messages }: MessageListProps) {
               {message.status === 'failed' ? <em>failed</em> : null}
             </div>
             <div className="message-bubble" aria-live={message.status === 'streaming' ? 'polite' : undefined}>
+              {message.image_preview_url ? (
+                <div className="message-image-preview">
+                  <img src={message.image_preview_url} alt="上传的图片" />
+                </div>
+              ) : null}
               <MessageContent content={message.content} streaming={message.status === 'streaming'} />
             </div>
           </div>

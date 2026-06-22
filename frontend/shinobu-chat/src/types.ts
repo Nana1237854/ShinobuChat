@@ -61,6 +61,7 @@ export type MessageOut = ApiMessage;
 export type ChatMessage = ApiMessage & {
   status?: 'sending' | 'streaming' | 'sent' | 'failed';
   local?: boolean;
+  image_preview_url?: string | null;
 };
 
 export type StreamEvent =
@@ -310,4 +311,125 @@ export type EmotionState = {
   confidence?: number | null;
   intensity?: number | null;
   reply_style_hint?: string | null;
+};
+
+// ── Conversation mode ──
+
+export type ConversationMode = 'companion' | 'work' | 'focus' | 'night';
+
+export type ModeSettings = {
+  mode: ConversationMode;
+  updated_at: string;
+};
+
+export type ModeUpdateRequest = {
+  mode: ConversationMode;
+};
+
+// ── Vision / multimodal ──
+
+export type VisionConfidence = {
+  score: number;
+  label: string;
+};
+
+export type VisionAnalyzeRequest = {
+  question?: string | null;
+};
+
+export type VisionAnalyzeResponse = {
+  analysis_id: string;
+  summary: string;
+  objects: string[];
+  scene?: string | null;
+  text_in_image?: string | null;
+  confidence: VisionConfidence;
+  created_at: string;
+};
+
+export type UploadedImagePreview = {
+  preview_id: string;
+  url: string;
+  width: number;
+  height: number;
+  file_name: string;
+};
+
+// ── Diary ──
+
+export type DiaryItem = {
+  diary_id: string;
+  date: string;
+  title: string;
+  summary: string;
+  mood?: string | null;
+  created_at: string;
+};
+
+export type DiaryDetail = DiaryItem & {
+  content: string;
+  tags: string[];
+  source_conversation_ids: string[];
+};
+
+export type DiaryGenerateRequest = {
+  date?: string | null;
+  style?: string | null;
+};
+
+export type DiaryGenerateResponse = {
+  diary_id: string;
+  date: string;
+  title: string;
+  summary: string;
+  content: string;
+  mood?: string | null;
+  tags: string[];
+};
+
+// ── Live2D interaction ──
+
+export type Live2DHitArea = 'head' | 'body' | 'hand' | 'unknown';
+
+export type Live2DInteractionEvent = {
+  hit_area: Live2DHitArea;
+  x: number;
+  y: number;
+  timestamp: string;
+};
+
+export type Live2DInteractionFeedback = {
+  event_id: string;
+  animation?: string | null;
+  expression?: string | null;
+  message?: string | null;
+};
+
+// ── Group chat characters ──
+
+export type AssistantRole = 'narrator' | 'observer' | 'participant' | 'moderator';
+
+export type CharacterProfile = {
+  id: string;
+  name: string;
+  persona: string;
+  avatar_url?: string | null;
+  color?: string | null;
+  created_at: string;
+};
+
+export type GroupChatMessage = {
+  id: string;
+  character_id: string;
+  character_name: string;
+  content: string;
+  role: AssistantRole;
+  created_at: string;
+};
+
+export type AuxiliaryCharacterState = {
+  character_id: string;
+  active: boolean;
+  last_spoke_at?: string | null;
+  involvement: number;
 };

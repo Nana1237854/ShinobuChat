@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState, type MouseEvent } from 'react';
-import { Bot, Clock3, Cpu, Palette, Puzzle, Settings2, X } from 'lucide-react';
+import { Bot, Clock3, Cpu, Palette, Puzzle, Settings2, SunMoon, X } from 'lucide-react';
 import { CharacterEditor } from '../chat/CharacterEditor';
 import { PetSettingsPanel } from '../desktop-pet/PetSettingsPanel';
 import { GoalTrackerPanel } from '../goals/GoalTrackerPanel';
@@ -8,8 +8,10 @@ import type { BackgroundItem, Live2DModelItem, PetSettings } from '../types';
 import { ConfigPanel } from './ConfigPanel';
 import { PersonaSettingsPanel } from './PersonaSettingsPanel';
 import { SkillPanel } from './SkillPanel';
+import { ModeSwitch } from '../modes/ModeSwitch';
+import type { ConversationMode } from '../types';
 
-export type SettingsTab = 'appearance' | 'persona' | 'models' | 'skills' | 'memories' | 'goals';
+export type SettingsTab = 'appearance' | 'persona' | 'models' | 'skills' | 'memories' | 'goals' | 'mode';
 
 type SettingsPageProps = {
   accessToken: string;
@@ -18,9 +20,11 @@ type SettingsPageProps = {
   models: Live2DModelItem[];
   backgrounds: BackgroundItem[];
   initialTab?: SettingsTab;
+  conversationMode: ConversationMode | null;
   onPetSettingsChange: (settings: PetSettings) => void;
   onRefreshModels: () => void;
   onGoalsChanged?: () => void;
+  onModeChange: (mode: ConversationMode) => void;
   onClose: () => void;
 };
 
@@ -38,6 +42,7 @@ const tabs: TabDefinition[] = [
   { id: 'skills', label: '技能管理', note: '安装、编辑与启停 Skill', icon: Puzzle },
   { id: 'memories', label: '记忆时间线', note: '搜索与回放长期记忆', icon: Settings2 },
   { id: 'goals', label: '长期目标', note: '陪伴式追踪与 check-in', icon: Clock3 },
+  { id: 'mode', label: '情景模式', note: '切换陪伴 / 工作 / 专注 / 夜间', icon: SunMoon },
 ];
 
 export function SettingsPage({
@@ -47,9 +52,11 @@ export function SettingsPage({
   models,
   backgrounds,
   initialTab = 'appearance',
+  conversationMode,
   onPetSettingsChange,
   onRefreshModels,
   onGoalsChanged,
+  onModeChange,
   onClose,
 }: SettingsPageProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
@@ -169,6 +176,22 @@ export function SettingsPage({
           {activeTab === 'skills' ? <SkillPanel accessToken={accessToken} /> : null}
           {activeTab === 'memories' ? <MemoryTimelinePanel accessToken={accessToken} /> : null}
           {activeTab === 'goals' ? <GoalTrackerPanel accessToken={accessToken} onGoalsChanged={onGoalsChanged} /> : null}
+          {activeTab === 'mode' ? (
+            <div className="settings-legacy-panel">
+              <header className="settings-content-header">
+                <div>
+                  <span className="settings-eyebrow">Conversation mode</span>
+                  <h2>情景模式</h2>
+                  <p>切换即时生效，当前模式会影响 Shinobu 的回复风格和通知频率。</p>
+                </div>
+              </header>
+              <ModeSwitch
+                accessToken={accessToken}
+                mode={conversationMode}
+                onModeChange={onModeChange}
+              />
+            </div>
+          ) : null}
         </main>
       </section>
     </div>

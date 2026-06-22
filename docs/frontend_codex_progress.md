@@ -263,3 +263,123 @@
   - GitHub URL ?????????????????
 - ?????????
   - ???? F0-F10 ????
+
+## F11
+- 完成内容
+  - 扩展 `types.ts`：新增 `ConversationMode`, `ModeSettings`, `ModeUpdateRequest`, `VisionAnalyzeRequest`, `VisionAnalyzeResponse`, `UploadedImagePreview`, `VisionConfidence`, `DiaryItem`, `DiaryDetail`, `DiaryGenerateRequest`, `DiaryGenerateResponse`, `Live2DHitArea`, `Live2DInteractionEvent`, `Live2DInteractionFeedback`, `CharacterProfile`, `AssistantRole`, `GroupChatMessage`, `AuxiliaryCharacterState`
+  - 新增 `src/api/modes.ts`：`getConversationMode()`, `updateConversationMode()`
+  - 新增 `src/api/vision.ts`：`analyzeImage(file, question?)` 使用 FormData
+  - 新增 `src/api/diaries.ts`：`listDiaries()`, `getDiaryByDate()`, `generateDiary()`
+  - 新增 `src/api/characters.ts`：`listCharacterProfiles()`, `createCharacterProfile()`, `updateCharacterProfile()`, `deleteCharacterProfile()`, `updateConversationCharacters()`
+  - 新增 `src/api/interactions.ts`：`recordLive2DInteraction()`
+- 新增文件
+  - `frontend/shinobu-chat/src/api/modes.ts`
+  - `frontend/shinobu-chat/src/api/vision.ts`
+  - `frontend/shinobu-chat/src/api/diaries.ts`
+  - `frontend/shinobu-chat/src/api/characters.ts`
+  - `frontend/shinobu-chat/src/api/interactions.ts`
+- 修改文件
+  - `frontend/shinobu-chat/src/types.ts`
+- 已接入接口（路径）
+  - `GET /api/v1/modes/current`
+  - `PUT /api/v1/modes/current`
+  - `POST /api/v1/vision/analyze`
+  - `GET /api/v1/diaries`
+  - `GET /api/v1/diaries/{date}`
+  - `POST /api/v1/diaries/generate`
+  - `GET /api/v1/characters/profiles`
+  - `POST /api/v1/characters/profiles`
+  - `PATCH /api/v1/characters/profiles/{id}`
+  - `DELETE /api/v1/characters/profiles/{id}`
+  - `PUT /api/v1/characters/conversation`
+  - `POST /api/v1/interactions/live2d`
+- 需要后端配合
+  - 全部 12 个接口均需后端实现，前端 API client 已按预期路径封装，调用方能拿到明确错误
+- 构建 / 类型检查结果
+  - `npm run typecheck` 通过（0 错误）
+  - `npm run build` 通过（tsc -b + vite build，3.12s）
+- 遗留问题
+  - 无
+- 是否可以进入下一阶段
+  - 是
+
+## F12
+- 完成内容
+  - 新建 `src/modes/ModeSwitch.tsx`：`ModeSwitch` 组件 + `useConversationMode` hook + `getModePlaceholder()` / `getModeStatusLabel()` 工具函数
+  - 
+  - `ModeSwitch` 组件显示 4 张模式卡片（陪伴/工作/专注/夜间），支持切换、loading 禁用、失败回滚
+  - `App.tsx`：新增 `conversationMode` 状态 + 初始化加载 + 传递给 Composer 和 SettingsPage
+  - `Composer.tsx`：新增 `conversationMode` prop，placeholder 根据 mode 动态变化
+  - `SettingsPage.tsx`：新增 `mode` Tab + `ModeSwitch` 组件接入
+  - 聊天界面反馈：chat header 显示 mode chip、work/focus/night 模式显示情景提示横幅
+  - `styles.css`：新增 `.mode-chip`、`.mode-hint-banner`、`.mode-switch`、`.mode-options`、`.mode-option` 等样式
+- 新增文件
+  - `frontend/shinobu-chat/src/modes/ModeSwitch.tsx`
+- 修改文件
+  - `frontend/shinobu-chat/src/App.tsx`
+  - `frontend/shinobu-chat/src/chat/Composer.tsx`
+  - `frontend/shinobu-chat/src/settings/SettingsPage.tsx`
+  - `frontend/shinobu-chat/src/styles.css`
+- ModeSwitch 放置位置
+  - 设置页新增"情景模式"Tab（SettingsPage → SettingsTab.mode）
+  - 聊天 header 显示当前 mode 标签（.mode-chip）
+  - 聊天 pane 顶部显示模式提示横幅（work/focus/night）
+- 四种 mode 的 UI 表现
+  - 陪伴：默认 placeholder，无提示横幅，mode chip 显示"陪伴模式"
+  - 工作：placeholder 变为任务导向，蓝色提示横幅"工作模式：优先结构化回复"
+  - 专注：placeholder 提示专注中，黄色提示横幅"专注模式：已减少非必要提示"
+  - 夜间：placeholder 轻声化，紫色提示横幅"夜间模式：回复更轻柔，减少打扰"
+- 与 SettingsPage / Chat UI 的接入点
+  - SettingsPage 新增 `mode` Tab 渲染 ModeSwitch，接收 `conversationMode` 和 `onModeChange`
+  - App.tsx 的 chat-header 显示 mode chip，conversation-pane 显示 mode hint banner
+  - Composer 接收 `conversationMode` 并动态设置 placeholder
+- 接口是否已联调
+  - 使用 F11 封装的 `getConversationMode()` / `updateConversationMode()`，后端接口未就绪时前端正常显示错误
+- 构建 / 类型检查结果
+  - `npm run typecheck` 通过（0 错误）
+  - `npm run build` 通过（tsc -b + vite build，3.28s，0 警告）
+- 遗留问题
+  - 无
+- 是否可以进入下一阶段
+  - 是
+
+## F13
+- 完成内容
+  - `Composer.tsx`：新增图片上传按钮（ImagePlus 图标）、隐藏 file input、图片预览缩略图（文件名 + 大小 + 移除按钮）、文件验证（类型 image/*、大小 5MB 上限、空文件检测）、object URL 生命周期管理（upload 创建 / unmount revoke / remove revoke）
+  - `App.tsx`：sendText 扩展为 `(text, imageFile?)`，有图片时调用 `analyzeImage()` API，创建用户图片消息 + assistant "正在看图..." streaming 消息，分析完成/失败后更新消息状态；新增 `formatVisionResponse()` 格式化摘要/识别文字/场景/物体/置信度提示
+  - `types.ts`：ChatMessage 新增 `image_preview_url?: string | null`
+  - `MessageList.tsx`：渲染图片消息的缩略图
+  - `styles.css`：新增 `.composer-image-preview`、`.composer-image-error`、`.composer-image-remove`、`.message-image-preview` 样式
+- 新增文件
+  - 无（所有改动均在现有文件中）
+- 修改文件
+  - `frontend/shinobu-chat/src/chat/Composer.tsx`
+  - `frontend/shinobu-chat/src/App.tsx`
+  - `frontend/shinobu-chat/src/types.ts`
+  - `frontend/shinobu-chat/src/chat/MessageList.tsx`
+  - `frontend/shinobu-chat/src/styles.css`
+- analyzeImage 调用流程
+  - 用户点击图片按钮 → file input → 选择文件 → 前端验证（type/size/empty）→ 显示预览缩略图
+  - 用户在文本框输入可选问题（无输入时默认"请描述这张图片"）
+  - 点击发送 → 创建用户图片消息 + "正在看图..." streaming → `analyzeImage(accessToken, file, question)` → 成功展示结构化分析结果 → 失败展示错误气泡
+  - 发送完成后释放 object URL
+- 错误处理
+  - 空图片：文件验证拦截，提示"文件为空，请重新选择"
+  - 非图片格式：验证 type 前缀，提示"不支持的文件格式，请选择图片"
+  - 文件太大：提示当前大小和 5MB 上限
+  - API 失败：通过 ApiRequestError 获取后端明确错误，显示"图片分析失败：{message}"
+  - 发布按钮 disabled 逻辑：无文本且无图片时不可发布
+- 隐私保护方式
+  - 不将图片转成 base64
+  - 不写入 localStorage
+  - 不 console.log 图片内容
+  - 发送完成后 URL.revokeObjectURL 释放内存
+  - 图片仅在当前会话的 object URL 中短暂存在
+  - 分析结果不自动写入 Memory
+- 构建 / 类型检查结果
+  - `npm run typecheck` 通过（0 错误）
+  - `npm run build` 通过（tsc -b + vite build，3.29s，0 警告）
+- 遗留问题
+  - 无
+- 是否可以进入下一阶段
+  - 是
