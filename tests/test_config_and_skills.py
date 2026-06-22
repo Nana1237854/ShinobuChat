@@ -1074,5 +1074,98 @@ description: Bad YAML
             mgr.install_from_url(self.user_id, "file:///etc/passwd")
 
 
+class SkillMarketTests(unittest.TestCase):
+    """Tests for the skill market backend — list and install."""
+
+    def setUp(self):
+        self.engine = create_engine("sqlite:///:memory:", future=True)
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine, future=True)
+        self.user_id = uuid.uuid4()
+        with self.Session() as db:
+            db.add(
+                User(
+                    id=self.user_id,
+                    email="market@example.com",
+                    hashed_password="x",
+                    display_name="Market",
+                )
+            )
+            db.commit()
+
+    def tearDown(self):
+        Base.metadata.drop_all(bind=self.engine)
+
+    def test_market_list_returns_skills(self):
+        from app.api.v1.routes.skill_market import list_market_skills
+
+        items = list_market_skills()
+        self.assertIsInstance(items, list)
+        self.assertGreater(len(items), 0)
+        first = items[0]
+        self.assertTrue(hasattr(first, "name"))
+        self.assertTrue(hasattr(first, "description"))
+        self.assertTrue(hasattr(first, "tags"))
+        self.assertTrue(hasattr(first, "official"))
+
+    def test_market_install_success(self):
+        from app.api.v1.routes.skill_market import _find_market_skill
+
+        item = _find_market_skill("daily-planner")
+        self.assertIsNotNone(item)
+        content = item["content"]
+        self.assertIn("name: daily-planner", content)
+
+        with self.Session() as db:
+            mgr = SkillManager(db)
+            installed = mgr.install_text(self.user_id, content, installed_from="market")
+            self.assertEqual(installed.name, "daily-planner")
+            self.assertEqual(installed.installed_from, "market")
+            self.assertTrue(installed.enabled)
+
+    def test_market_install_duplicate_fails(self):
+        from app.api.v1.routes.skill_market import _find_market_skill
+
+        item = _find_market_skill("learning-tracker")
+        content = item["content"]
+        with self.Session() as db:
+            mgr = SkillManager(db)
+            mgr.install_text(self.user_id, content, installed_from="market")
+            with self.assertRaises(Exception):
+                mgr.install_text(self.user_id, content, installed_from="market")
+
+    def test_market_install_invalid_name_returns_none(self):
+        from app.api.v1.routes.skill_market import _find_market_skill
+
+        self.assertIsNone(_find_market_skill("nonexistent-skill-xyz"))
+
+    def test_market_skill_has_required_fields(self):
+        from app.api.v1.routes.skill_market import _load_market
+
+        items = _load_market()
+        self.assertGreaterEqual(len(items), 3)
+        for item in items:
+            with self.subTest(name=item.get("name", "unknown")):
+                self.assertIn("name", item)
+                self.assertIn("description", item)
+                self.assertIn("content", item)
+                self.assertIn("tags", item)
+                self.assertIn("version", item)
+                self.assertIn("author", item)
+
+    def test_market_skill_content_is_valid_skillmd(self):
+        """All market skills must have valid SKILL.md content that parse() accepts."""
+        from app.api.v1.routes.skill_market import _load_market
+
+        items = _load_market()
+        with self.Session() as db:
+            mgr = SkillManager(db)
+            for item in items:
+                with self.subTest(name=item["name"]):
+                    parsed = mgr.parse(item["content"])
+                    self.assertTrue(parsed.name)
+                    self.assertTrue(parsed.description)
+
+
 if __name__ == "__main__":
     unittest.main()

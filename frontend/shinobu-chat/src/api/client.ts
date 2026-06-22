@@ -4,8 +4,11 @@ import type {
   CharacterCard,
   CharacterCardOverride,
   Conversation,
+  MarketSkill,
   RouteMode,
   StreamEvent,
+  UserConfigResponse,
+  UserSkill,
 } from '../types';
 import { decodeJwtSubject } from './auth';
 import { consumeSseStream } from './sse';
@@ -162,4 +165,113 @@ export async function synthesizeSpeech(payload: {
     emotion: response.headers.get('X-Shinobu-Voice-Emotion'),
     reference: response.headers.get('X-Shinobu-Voice-Reference'),
   };
+}
+
+
+function authorizedHeaders(accessToken: string, json = true): HeadersInit {
+  return {
+    ...(json ? { 'Content-Type': 'application/json' } : {}),
+    Authorization: `Bearer ${accessToken}`,
+  };
+}
+
+export async function fetchUserConfig(accessToken: string): Promise<UserConfigResponse> {
+  const response = await fetch(`${API_BASE}/config/user/me`, {
+    headers: authorizedHeaders(accessToken, false),
+  });
+  return parseJsonResponse<UserConfigResponse>(response);
+}
+
+export async function updateUserConfig(
+  accessToken: string,
+  values: Record<string, string | number | boolean | null>,
+): Promise<UserConfigResponse> {
+  const response = await fetch(`${API_BASE}/config/user/me`, {
+    method: 'PATCH',
+    headers: authorizedHeaders(accessToken),
+    body: JSON.stringify(values),
+  });
+  return parseJsonResponse<UserConfigResponse>(response);
+}
+
+export async function resetUserConfig(accessToken: string): Promise<UserConfigResponse> {
+  const response = await fetch(`${API_BASE}/config/user/me/reset`, {
+    method: 'PUT',
+    headers: authorizedHeaders(accessToken),
+  });
+  return parseJsonResponse<UserConfigResponse>(response);
+}
+
+export async function listUserSkills(accessToken: string): Promise<UserSkill[]> {
+  const response = await fetch(`${API_BASE}/skills/user/me`, {
+    headers: authorizedHeaders(accessToken, false),
+  });
+  return parseJsonResponse<UserSkill[]>(response);
+}
+
+export async function getUserSkill(accessToken: string, skillId: string): Promise<UserSkill> {
+  const response = await fetch(`${API_BASE}/skills/user/me/${encodeURIComponent(skillId)}`, {
+    headers: authorizedHeaders(accessToken, false),
+  });
+  return parseJsonResponse<UserSkill>(response);
+}
+
+export async function installUserSkill(accessToken: string, content: string): Promise<UserSkill> {
+  const response = await fetch(`${API_BASE}/skills/user/me`, {
+    method: 'POST',
+    headers: authorizedHeaders(accessToken),
+    body: JSON.stringify({ install_type: 'text', content }),
+  });
+  return parseJsonResponse<UserSkill>(response);
+}
+
+export async function updateUserSkill(
+  accessToken: string,
+  skillId: string,
+  content: string,
+): Promise<UserSkill> {
+  const response = await fetch(`${API_BASE}/skills/user/me/${encodeURIComponent(skillId)}`, {
+    method: 'PUT',
+    headers: authorizedHeaders(accessToken),
+    body: JSON.stringify({ content }),
+  });
+  return parseJsonResponse<UserSkill>(response);
+}
+
+export async function setUserSkillEnabled(
+  accessToken: string,
+  skillId: string,
+  enabled: boolean,
+): Promise<UserSkill> {
+  const response = await fetch(`${API_BASE}/skills/user/me/${encodeURIComponent(skillId)}`, {
+    method: 'PATCH',
+    headers: authorizedHeaders(accessToken),
+    body: JSON.stringify({ enabled }),
+  });
+  return parseJsonResponse<UserSkill>(response);
+}
+
+export async function deleteUserSkill(accessToken: string, skillId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/skills/user/me/${encodeURIComponent(skillId)}`, {
+    method: 'DELETE',
+    headers: authorizedHeaders(accessToken, false),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    const detail = data && typeof data === 'object' && 'detail' in data ? String(data.detail) : 'Delete failed';
+    throw new Error(detail);
+  }
+}
+
+export async function listMarketSkills(): Promise<MarketSkill[]> {
+  const response = await fetch(`${API_BASE}/skills/market`);
+  return parseJsonResponse<MarketSkill[]>(response);
+}
+
+export async function installMarketSkill(accessToken: string, name: string): Promise<UserSkill> {
+  const response = await fetch(`${API_BASE}/skills/market/${encodeURIComponent(name)}/install`, {
+    method: 'POST',
+    headers: authorizedHeaders(accessToken),
+  });
+  return parseJsonResponse<UserSkill>(response);
 }

@@ -106,3 +106,36 @@ export type PetSettings = {
   x: number;
   y: number;
 };
+
+export type UserConfigField = {
+  key: string;
+  value: string | number | boolean;
+  source: 'user' | 'env' | 'default';
+  encrypted: boolean;
+};
+
+export type UserConfigResponse = {
+  fields: UserConfigField[];
+};
+
+export type UserSkill = {
+  id: string;
+  name: string;
+  description: string;
+  keywords: string[];
+  enabled: boolean;
+  installed_from: string;
+  source_url?: string | null;
+  content?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MarketSkill = {
+  name: string;
+  description: string;
+  tags: string[];
+  version: string;
+  author: string;
+  official: boolean;
+};

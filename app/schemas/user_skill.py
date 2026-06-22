@@ -42,3 +42,13 @@ SkillDetailOut = UserSkillDetailOut
 SkillInstallRequest = UserSkillCreate
 SkillUpdateRequest = UserSkillUpdate
 SkillToggleRequest = UserSkillPatch
+
+
+class MarketSkillOut(BaseModel):
+    """Market skill listing — no full content, just metadata."""
+    name: str
+    description: str
+    tags: list[str]
+    version: str
+    author: str
+    official: bool

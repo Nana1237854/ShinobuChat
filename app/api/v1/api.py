@@ -9,6 +9,7 @@ from app.api.v1.routes import (
     memories,
     messages,
     sync,
+    skill_market,
     skills,
     todos,
     users,
@@ -20,6 +21,7 @@ api_router.include_router(users.router)
 api_router.include_router(auth.router)
 api_router.include_router(config.router)
 api_router.include_router(skills.router)
+api_router.include_router(skill_market.router)
 api_router.include_router(conversations.router)
 api_router.include_router(messages.router)
 api_router.include_router(memories.router)
