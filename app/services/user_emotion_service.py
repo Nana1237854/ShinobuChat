@@ -21,6 +21,10 @@ _STRESSED_KEYWORDS = [
     "受不了", "扛不住", "快疯了", "要疯了", "心态崩",
 ]
 
+_WORRIED_KEYWORDS = [
+    "担心", "害怕", "怕", "不安", "紧张", "会不会",
+]
+
 _SAD_KEYWORDS = [
     "难过", "伤心", "失望", "不开心", "想哭", "难受", "好想哭",
     "心里难受", "低落",
@@ -97,8 +101,14 @@ _HINT_TEMPLATES = {
 
 
 class UserEmotionService:
+    """Rule-based user emotion detector.
+
+    Current version is rule-only. The ``ai_client`` parameter and ``_llm_analyze``
+    method are reserved for optional LLM enhancement (not yet wired into analyze()).
+    """
+
     def __init__(self, ai_client=None):
-        self.ai_client = ai_client
+        self.ai_client = ai_client  # reserved for future LLM enhancement
 
     # ---- public API ----
 
@@ -107,6 +117,7 @@ class UserEmotionService:
         user_message: str,
         recent_user_messages: list[str] | None = None,
         now: datetime | None = None,
+        local_hour: int | None = None,
     ) -> UserEmotionResult:
         recent = recent_user_messages or []
         now = now or datetime.now(timezone.utc)
@@ -127,6 +138,7 @@ class UserEmotionService:
         combined = " ".join([*recent, user_message])
         scores = {
             "stressed": self._score(combined, _STRESSED_KEYWORDS),
+            "worried": self._score(combined, _WORRIED_KEYWORDS),
             "sad": self._score(combined, _SAD_KEYWORDS),
             "lonely": self._score(combined, _LONELY_KEYWORDS),
             "tired": self._score(combined, _TIRED_KEYWORDS),
@@ -149,14 +161,14 @@ class UserEmotionService:
 
         # 6. Time signal (weak)
         time_boost = 0.0
-        local_hour = now.hour  # UTC approximation
-        if 0 <= local_hour <= 5:
+        effective_hour = local_hour if local_hour is not None else now.hour
+        if 0 <= effective_hour <= 5:
             if scores["lonely"] > 0 or scores["tired"] > 0:
                 time_boost = 0.1
 
         # 7. Intensity
         max_possible = max(
-            len(_STRESSED_KEYWORDS), len(_SAD_KEYWORDS), len(_LONELY_KEYWORDS),
+            len(_STRESSED_KEYWORDS), len(_WORRIED_KEYWORDS), len(_SAD_KEYWORDS), len(_LONELY_KEYWORDS),
             len(_TIRED_KEYWORDS), len(_HAPPY_KEYWORDS), len(_FRUSTRATED_KEYWORDS),
             len(_CONFUSED_KEYWORDS),
         )
@@ -212,7 +224,7 @@ class UserEmotionService:
     @staticmethod
     def _count_consecutive_negative(recent: list[str], current: str) -> int:
         all_keywords = (
-            _STRESSED_KEYWORDS + _SAD_KEYWORDS + _LONELY_KEYWORDS
+            _STRESSED_KEYWORDS + _WORRIED_KEYWORDS + _SAD_KEYWORDS + _LONELY_KEYWORDS
             + _TIRED_KEYWORDS + _FRUSTRATED_KEYWORDS + _CONFUSED_KEYWORDS
         )
 
@@ -227,7 +239,9 @@ class UserEmotionService:
                 break
         return count
 
-    # ---- optional LLM enhancement (inactive by default) ----
+    # ---- optional LLM enhancement (NOT YET WIRED — analyze() is rule-only) ----
+    # To enable: inject AIClient via get_user_emotion_service() and call
+    # _llm_analyze() inside analyze(), merging results with rule output as fallback.
 
     def _llm_analyze(
         self,

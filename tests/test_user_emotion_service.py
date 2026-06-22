@@ -139,6 +139,28 @@ class UserEmotionServiceTests(unittest.TestCase):
         )
         self.assertIsNotNone(result.emotion_label)
 
+    # 16. local_hour=3 + tired/lonely words gets night weak signal
+    def test_local_hour_night_signal(self):
+        day_result = self.svc.analyze(
+            user_message="好累，还没睡",
+            local_hour=14,
+        )
+        night_result = self.svc.analyze(
+            user_message="好累，还没睡",
+            local_hour=3,
+        )
+        self.assertGreaterEqual(night_result.confidence, day_result.confidence)
+
+    # 17. worried keywords produce worried label
+    def test_worried_keywords(self):
+        result = self.svc.analyze(
+            user_message="我好担心明天会不会出事",
+            recent_user_messages=["有点不安", "紧张"],
+        )
+        self.assertEqual(result.emotion_label, "worried")
+        self.assertTrue(result.should_adjust_reply)
+        self.assertIn("不要长篇说教", result.reply_style_hint)
+
 
 if __name__ == "__main__":
     unittest.main()

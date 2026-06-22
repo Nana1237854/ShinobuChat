@@ -19,5 +19,6 @@ def analyze_emotion(
     result = service.analyze(
         user_message=payload.message,
         recent_user_messages=truncated_recent,
+        local_hour=payload.local_hour,
     )
     return EmotionAnalyzeResponse.model_validate(result)

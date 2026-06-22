@@ -146,16 +146,19 @@ class AgentCoordinator:
             return ""
 
     def _user_emotion_context(self, content: str, history: list[Message]) -> str:
-        recent = [
-            m.content for m in history
-            if getattr(m, "role", None) == "user"
-        ][-5:]
-        result = self.user_emotion_service.analyze(
-            user_message=content,
-            recent_user_messages=recent,
-        )
-        if result.should_adjust_reply and result.reply_style_hint:
-            return f"【用户当前情绪回应提示】\n{result.reply_style_hint}"
+        try:
+            recent = [
+                m.content for m in history
+                if getattr(m, "role", None) == "user"
+            ][-5:]
+            result = self.user_emotion_service.analyze(
+                user_message=content,
+                recent_user_messages=recent,
+            )
+            if result.should_adjust_reply and result.reply_style_hint:
+                return f"【用户当前情绪回应提示】\n{result.reply_style_hint}"
+        except Exception:
+            pass
         return ""
 
     def _detect_agent_continuation(self, content: str, history: list[Message]) -> RouterDecision | None:
