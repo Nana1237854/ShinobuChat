@@ -1,17 +1,19 @@
 ﻿import { useEffect, useState, type MouseEvent } from 'react';
-import { Bot, Clock3, Cpu, Palette, Puzzle, Settings2, SunMoon, X } from 'lucide-react';
+import { BookOpen, Bot, Clock3, Cpu, Palette, Puzzle, Settings2, SunMoon, Users, X } from 'lucide-react';
 import { CharacterEditor } from '../chat/CharacterEditor';
 import { PetSettingsPanel } from '../desktop-pet/PetSettingsPanel';
 import { GoalTrackerPanel } from '../goals/GoalTrackerPanel';
 import { MemoryTimelinePanel } from '../memories/MemoryTimelinePanel';
-import type { BackgroundItem, Live2DModelItem, PetSettings } from '../types';
+import { DiaryPanel } from '../diaries/DiaryPanel';
+import { CharacterPanel } from '../characters/CharacterPanel';
+import type { BackgroundItem, CharacterProfile, Live2DModelItem, PetSettings } from '../types';
 import { ConfigPanel } from './ConfigPanel';
 import { PersonaSettingsPanel } from './PersonaSettingsPanel';
 import { SkillPanel } from './SkillPanel';
 import { ModeSwitch } from '../modes/ModeSwitch';
 import type { ConversationMode } from '../types';
 
-export type SettingsTab = 'appearance' | 'persona' | 'models' | 'skills' | 'memories' | 'goals' | 'mode';
+export type SettingsTab = 'appearance' | 'persona' | 'models' | 'skills' | 'memories' | 'goals' | 'mode' | 'diaries' | 'characters';
 
 type SettingsPageProps = {
   accessToken: string;
@@ -21,10 +23,12 @@ type SettingsPageProps = {
   backgrounds: BackgroundItem[];
   initialTab?: SettingsTab;
   conversationMode: ConversationMode | null;
+  activeCharacters?: CharacterProfile[];
   onPetSettingsChange: (settings: PetSettings) => void;
   onRefreshModels: () => void;
   onGoalsChanged?: () => void;
   onModeChange: (mode: ConversationMode) => void;
+  onCharactersChange?: (chars: CharacterProfile[]) => void;
   onClose: () => void;
 };
 
@@ -43,6 +47,8 @@ const tabs: TabDefinition[] = [
   { id: 'memories', label: '记忆时间线', note: '搜索与回放长期记忆', icon: Settings2 },
   { id: 'goals', label: '长期目标', note: '陪伴式追踪与 check-in', icon: Clock3 },
   { id: 'mode', label: '情景模式', note: '切换陪伴 / 工作 / 专注 / 夜间', icon: SunMoon },
+  { id: 'diaries', label: 'Shinobu 日记', note: '每日回顾与心情记录', icon: BookOpen },
+  { id: 'characters', label: '辅助角色', note: '管理会话角色', icon: Users },
 ];
 
 export function SettingsPage({
@@ -53,10 +59,12 @@ export function SettingsPage({
   backgrounds,
   initialTab = 'appearance',
   conversationMode,
+  activeCharacters = [],
   onPetSettingsChange,
   onRefreshModels,
   onGoalsChanged,
   onModeChange,
+  onCharactersChange,
   onClose,
 }: SettingsPageProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
@@ -189,6 +197,23 @@ export function SettingsPage({
                 accessToken={accessToken}
                 mode={conversationMode}
                 onModeChange={onModeChange}
+              />
+            </div>
+          ) : null}
+
+          {activeTab === 'diaries' ? (
+            <div className="settings-legacy-panel">
+              <DiaryPanel accessToken={accessToken} />
+            </div>
+          ) : null}
+
+          {activeTab === 'characters' ? (
+            <div className="settings-legacy-panel">
+              <CharacterPanel
+                accessToken={accessToken}
+                activeCharacters={activeCharacters}
+                conversationMode={conversationMode}
+                onCharactersChange={onCharactersChange || (() => {})}
               />
             </div>
           ) : null}

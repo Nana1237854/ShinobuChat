@@ -27,7 +27,7 @@ export function ModeSwitch({ accessToken, mode, onModeChange }: ModeSwitchProps)
 
   const handleSwitch = useCallback(
     async (next: ConversationMode) => {
-      if (!mode || switching || next === mode) return;
+      if (switching || next === mode) return;
       const previous = mode;
       setSwitching(next);
       setError(null);

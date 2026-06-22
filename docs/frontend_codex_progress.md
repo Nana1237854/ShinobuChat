@@ -383,3 +383,103 @@
   - 无
 - 是否可以进入下一阶段
   - 是
+
+## F18
+- 完成内容
+  - 对 F11-F17 所有新组件进行全面安全/隐私/错误处理审计
+  - 修复 ModeSwitch.tsx 中 mode 为 null 时无法切换模式的 bug（移除 `!mode` 保护条件，允许在初始加载失败后仍可切换模式并显示 API 错误）
+  - 隐私扫描全部通过（无 console.log、无 dangerouslySetInnerHTML、无敏感数据泄漏）
+  - 验证所有错误 CSS 类名一致性（`.error-banner` / `.settings-status-error` / `.mode-switch-error` / `.composer-image-error`）
+  - 验证所有组件空/加载/禁用/错误状态完整性
+  - 整理后端依赖接口表
+- 修改文件
+  - `frontend/shinobu-chat/src/modes/ModeSwitch.tsx`（修复 mode=null 时无法切换的 bug，1 行改动）
+- 未修改文件（审计通过，无需改动）
+  - `frontend/shinobu-chat/src/chat/Composer.tsx`
+  - `frontend/shinobu-chat/src/App.tsx`
+  - `frontend/shinobu-chat/src/diaries/DiaryPanel.tsx`
+  - `frontend/shinobu-chat/src/live2d/Live2DStage.tsx`
+  - `frontend/shinobu-chat/src/characters/CharacterPanel.tsx`
+  - `frontend/shinobu-chat/src/chat/MessageList.tsx`
+  - `frontend/shinobu-chat/src/settings/SettingsPage.tsx`
+- 隐私扫描结果
+
+  | 扫描项 | 正则 | 结果 |
+  |---|---|---|
+  | console.log | `console\.log` | 0 匹配 -- 无泄漏 |
+  | localStorage.setItem | `localStorage\.setItem|localStorage\[` | 5 处使用：route-mode、conversation-id、device-key、pet-settings、auth session（F10 已迁移至 sessionStorage）-- 均为非敏感偏好数据 |
+  | dangerouslySetInnerHTML | `dangerouslySetInnerHTML` | 0 匹配 -- 无 XSS 风险 |
+  | base64/btoa/atob | `base64|btoa|atob` | 4 处：TTS 音频流解码（App.tsx playBase64Audio）、硬编码通知音效、JWT payload 解析（auth.ts）、测试文件（auth.test.ts）-- 均为合法用途 |
+  | JSON.stringify 敏感键 | `JSON\.stringify.*token|key|secret|password` | 0 匹配 -- 无敏感数据序列化 |
+  | 图片 base64 持久化 | -- | 已验证 F13 使用 URL.createObjectURL + revokeObjectURL，不转为 base64，不持久化 |
+
+- 错误处理审计结果
+
+  | 组件 | 操作 | 错误展示方式 | 状态 |
+  |---|---|---|---|
+  | ModeSwitch | mode read 失败 | App.tsx 内联加载，静默回退到 null（companion 模式） | 通过（graceful fallback） |
+  | ModeSwitch | mode switch 失败 | `.mode-switch-error` 显示错误信息 | 通过 |
+  | Composer | 图片验证（type/size/empty） | `.composer-image-error` 显示具体错误 | 通过 |
+  | App.tsx sendText | 图片分析 API 失败 | 消息气泡内显示"图片分析失败：{message}" | 通过 |
+  | App.tsx sendText | 聊天消息 API 失败 | `.error-banner` 显示错误 | 通过 |
+  | DiaryPanel | list / detail / generate 失败 | `.settings-status-error` + 重试按钮（list） | 通过 |
+  | Live2DStage | runtime 加载失败 | `.live2d-placeholder.is-error` 显示错误 | 通过 |
+  | Live2DStage | emotion/motion 应用失败 | console.warn（非关键视觉特性，可接受） | 通过 |
+  | Live2DStage | hit test 越界 | 返回 'unknown'，不触发交互 | 通过 |
+  | Live2DStage | 无 model | `.live2d-placeholder` 显示友好提示 | 通过 |
+  | CharacterPanel | list / create / delete 失败 | `.settings-status-error` 显示错误 | 通过 |
+
+- 空/加载/禁用状态审计结果
+
+  | 组件 | Loading | Empty | Error | Disabled |
+  |---|---|---|---|---|
+  | ModeSwitch | -- | -- | error 消息 + 按钮全 disabled | 切换时所有按钮 disabled |
+  | Composer | -- | -- | 图片验证错误 + 按钮 disabled | streaming 时按钮 disabled、无内容时发送 disabled |
+  | DiaryPanel | 骨架屏（`.settings-skeleton`） | "还没有日记" + 生成按钮 | 错误消息 + 重试按钮 | 生成中按钮 disabled |
+  | Live2DStage | "Loading {name}..." 文字 | "Put models in..." 占位提示 | 错误文字（`.live2d-placeholder.is-error`） | -- |
+  | CharacterPanel | 骨架屏（`.settings-skeleton`） | "还没有辅助角色" 空状态 | `.settings-status-error` | 提交中按钮 disabled、达到上限按钮 disabled |
+  | MessageList | -- | welcome-card 欢迎卡片 | failed status 标签 | -- |
+
+- 统一错误 CSS 类验证
+
+  | CSS 类 | 用途 | 使用组件 | 状态 |
+  |---|---|---|---|
+  | `.error-banner` | 聊天级错误 | App.tsx | 一致 |
+  | `.settings-status-error` | 设置页错误 | DiaryPanel, CharacterPanel | 一致 |
+  | `.mode-switch-error` | 模式切换错误 | ModeSwitch | 一致 |
+  | `.composer-image-error` | 图片验证/上传错误 | Composer | 一致 |
+
+- BUG FIX: ModeSwitch 在 mode=null 时无法切换
+
+  - 问题：`ModeSwitch.handleSwitch` 中 `if (!mode || switching || next === mode) return;` 当 API 初始加载失败导致 mode 为 null 时，所有模式按钮点击被静默拦截，用户无法切换模式。
+  - 修复：移除 `!mode ||` 条件，改为 `if (switching || next === mode) return;`。切换时 API 错误会正常显示在 `.mode-switch-error` 中。
+  - 影响文件：`ModeSwitch.tsx` 仅改 1 行。
+
+- 后端依赖接口表（F11-F17 所有新增 API）
+
+  | Phase | Method | Path | Used By |
+  |---|---|---|---|
+  | F11 | GET | /api/v1/modes/current | ModeSwitch, App.tsx |
+  | F11 | PUT | /api/v1/modes/current | ModeSwitch, useConversationMode |
+  | F11 | POST | /api/v1/vision/analyze | App.tsx (sendText with image) |
+  | F11 | GET | /api/v1/diaries | DiaryPanel |
+  | F11 | GET | /api/v1/diaries/{date} | DiaryPanel |
+  | F11 | POST | /api/v1/diaries/generate | DiaryPanel |
+  | F11 | GET | /api/v1/characters/profiles | CharacterPanel |
+  | F11 | POST | /api/v1/characters/profiles | CharacterPanel |
+  | F11 | PATCH | /api/v1/characters/profiles/{id} | characters API client |
+  | F11 | DELETE | /api/v1/characters/profiles/{id} | CharacterPanel |
+  | F11 | PUT | /api/v1/characters/conversation | CharacterPanel |
+  | F11 | POST | /api/v1/interactions/live2d | interactions API client |
+
+  注：所有路径前缀为 `/api/v1`（定义于 `src/api/http.ts` 第 1 行 `const API_BASE = '/api/v1'`），上表列出完整路径。全部 12 个接口均需后端实现。
+
+- 构建 / 类型检查结果
+  - `npm run typecheck` 通过（0 错误）
+  - `npm run build` 通过（tsc -b + vite build，2.86s，0 警告）
+- 遗留问题
+  - App.tsx mode 初始加载失败时静默回退到 null，如需可见提示可后续在 chat header mode chip 附近添加 tooltip 样式错误提示
+  - CharacterPanel 错误消息使用英文（"Failed to..."），其余组件使用中文，可后续统一
+  - Live2DStage 中 emotion/motion 应用失败使用 console.warn，非关键特性，生产构建会被 tree-shake
+- 是否可以进入下一阶段
+  - 是

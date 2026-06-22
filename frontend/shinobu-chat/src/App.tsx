@@ -857,9 +857,11 @@ export default function App() {
           settings={petSettings}
           activeEmotion={activeEmotion}
           activeTool={activeTool}
+          conversationMode={conversationMode}
           onSettingsChange={setPetSettings}
           onInteract={handlePetInteraction}
           onLipSyncReady={setLipSyncRef}
+          onOpenSettings={(tab) => openSettingsTab((tab || 'appearance') as SettingsTab)}
         />
         <PetTaskbar
           activeTool={activeTool}
@@ -876,6 +878,7 @@ export default function App() {
             models={models}
             backgrounds={backgrounds}
             conversationMode={conversationMode}
+            activeCharacters={[]}
             onPetSettingsChange={setPetSettings}
             onRefreshModels={() => {
               reloadAssets().catch(nextError => {
@@ -884,6 +887,7 @@ export default function App() {
             }}
             onGoalsChanged={refreshGoalPreview}
             onModeChange={setConversationMode}
+            onCharactersChange={() => {}}
             onClose={() => setSettingsOpen(false)}
           />
         ) : null}
@@ -897,7 +901,7 @@ export default function App() {
             onClose={removeReminderFromQueue}
           />
         ) : null}
-        {routeMode === 'chat' && emotionState?.reply_style_hint ? (
+        {routeMode === 'chat' && conversationMode !== 'focus' && emotionState?.reply_style_hint ? (
           <div className={['emotion-hint', emotionState.intensity && emotionState.intensity >= 0.72 ? 'is-strong' : ''].filter(Boolean).join(' ')}>
             <strong>Shinobu</strong>
             <span>{emotionState.reply_style_hint}</span>

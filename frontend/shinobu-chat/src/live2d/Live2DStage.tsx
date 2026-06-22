@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-import type { AvatarTool, Live2DModelItem, PetSettings } from '../types';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Palette, SlidersHorizontal, UserRoundCog, X } from 'lucide-react';
+import type { AvatarTool, ConversationMode, Live2DHitArea, Live2DModelItem, PetSettings } from '../types';
 import { clamp } from './settings';
 import { LIP_SYNC_IDS } from './lipSync';
 
@@ -8,9 +9,11 @@ type Live2DStageProps = {
   settings: PetSettings;
   activeEmotion?: string | null;
   activeTool: AvatarTool | null;
+  conversationMode?: ConversationMode | null;
   onSettingsChange: (settings: PetSettings) => void;
   onInteract: () => void;
   onLipSyncReady?: (setter: (value: number) => void) => void;
+  onOpenSettings?: (tab?: string) => void;
 };
 
 type LoadedRuntime = {
@@ -134,11 +137,14 @@ export function Live2DStage({
   settings,
   activeEmotion,
   activeTool,
+  conversationMode,
   onSettingsChange,
   onInteract,
   onLipSyncReady,
+  onOpenSettings,
 }: Live2DStageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<LoadedRuntime | null>(null);
   const emotionRef = useRef<string | null | undefined>(activeEmotion);
   const onLipSyncReadyRef = useRef(onLipSyncReady);
@@ -147,6 +153,121 @@ export function Live2DStage({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const prevEntryRef = useRef<string | undefined>();
+
+  // ── Interaction state ──
+  const [bubble, setBubble] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+
+  const lastClickTimeRef = useRef(0);
+  const longPressTimerRef = useRef<number | null>(null);
+  const clickStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const tempEmotionTimerRef = useRef<number | null>(null);
+  const longPressTriggeredRef = useRef(false);
+  const interactionArmedRef = useRef(false);
+  const bubbleIdRef = useRef(0);
+
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current !== null) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const clearTempEmotion = useCallback(() => {
+    if (tempEmotionTimerRef.current !== null) {
+      clearTimeout(tempEmotionTimerRef.current);
+      tempEmotionTimerRef.current = null;
+    }
+  }, []);
+
+  const detectHitArea = useCallback((clientX: number, clientY: number, stageRect: DOMRect): Live2DHitArea => {
+    const relX = (clientX - stageRect.left) / (stageRect.width || 1);
+    const relY = (clientY - stageRect.top) / (stageRect.height || 1);
+
+    const modelCenterX = settings.x / 100;
+    const modelBottom = settings.y / 100;
+    const modelHeight = settings.scale * 1.2;
+    const modelWidth = modelHeight * 0.6;
+
+    const modelLeft = modelCenterX - modelWidth / 2;
+    const modelRight = modelCenterX + modelWidth / 2;
+    const modelTop = modelBottom - modelHeight;
+
+    if (relX >= modelLeft && relX <= modelRight && relY >= modelTop && relY <= modelBottom) {
+      const vertPos = (relY - modelTop) / (modelHeight || 0.001);
+      if (vertPos < 0.35) return 'head';
+      if (vertPos < 0.75) return 'body';
+      return 'hand';
+    }
+
+    if (relX >= modelLeft - 0.05 && relX <= modelRight + 0.05 && relY >= modelTop && relY <= modelBottom) {
+      return 'hand';
+    }
+
+    return 'unknown';
+  }, [settings.scale, settings.x, settings.y]);
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  const emitBubble = useCallback((text: string, x: number, y: number) => {
+    bubbleIdRef.current += 1;
+    const currentId = bubbleIdRef.current;
+    setBubble({ text, x, y });
+    window.setTimeout(() => {
+      if (bubbleIdRef.current === currentId) {
+        setBubble(null);
+      }
+    }, 1500);
+  }, []);
+
+  const handleClickFeedback = useCallback((hitArea: Live2DHitArea, clientX: number, clientY: number, stageRect: DOMRect) => {
+    // Focus mode: only respond to head clicks, suppress body/hand interactions
+    if (conversationMode === 'focus' && hitArea !== 'head') {
+      return;
+    }
+
+    const x = clientX - stageRect.left;
+    const y = clientY - stageRect.top;
+
+    switch (hitArea) {
+      case 'head': {
+        emitBubble('嗯？', x, y);
+        const runtime = runtimeRef.current;
+        if (runtime && model?.emotionMapping) {
+          const prevEmotion = emotionRef.current;
+          const emotionToTry = model.emotionMapping.happy
+            ? 'happy'
+            : model.emotionMapping.shy
+              ? 'shy'
+              : model.emotionMapping.neutral
+                ? 'neutral'
+                : null;
+          if (emotionToTry) {
+            applyLive2DEmotion(runtime, model, emotionToTry);
+            clearTempEmotion();
+            tempEmotionTimerRef.current = window.setTimeout(() => {
+              applyLive2DEmotion(runtime, model, prevEmotion);
+            }, 2000);
+          }
+        }
+        break;
+      }
+      case 'body': {
+        emitBubble('…', x, y);
+        break;
+      }
+      case 'hand': {
+        emitBubble('嗨~', x, y);
+        break;
+      }
+      default:
+        break;
+    }
+  }, [emitBubble, model, clearTempEmotion, conversationMode]);
+
+  // ── Lifecycle ──
 
   useEffect(() => {
     const container = containerRef.current;
@@ -160,7 +281,6 @@ export function Live2DStage({
     prevEntryRef.current = model.entry;
 
     let cancelled = false;
-    console.log('[Live2D] CREATING model:', model.id, 'entry:', model.entry);
     setLoading(true);
     setError(null);
     runtimeRef.current?.app.destroy(true, { children: true, texture: true, baseTexture: true });
@@ -242,6 +362,17 @@ export function Live2DStage({
     return () => observer.disconnect();
   }, [settings.x, settings.y, model?.entry]);
 
+  // ── Timer cleanup on unmount ──
+
+  useEffect(() => {
+    return () => {
+      clearLongPressTimer();
+      clearTempEmotion();
+    };
+  }, [clearLongPressTimer, clearTempEmotion]);
+
+  // ── Pointer event handlers ──
+
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = {
@@ -251,6 +382,26 @@ export function Live2DStage({
       originX: settings.x,
       originY: settings.y,
     };
+
+    // Only arm interaction tracking when a model is loaded
+    if (!model) return;
+
+    clickStartPosRef.current = { x: event.clientX, y: event.clientY };
+    longPressTriggeredRef.current = false;
+    interactionArmedRef.current = true;
+
+    clearLongPressTimer();
+    longPressTimerRef.current = window.setTimeout(() => {
+      if (!interactionArmedRef.current) return;
+      longPressTriggeredRef.current = true;
+      const stageEl = stageRef.current;
+      if (!stageEl) return;
+      const rect = stageEl.getBoundingClientRect();
+      setContextMenu({
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      });
+    }, 600);
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -264,12 +415,64 @@ export function Live2DStage({
       x: clamp(drag.originX + dx, -20, 120),
       y: clamp(drag.originY + dy, 0, 120),
     });
+
+    // Cancel long-press if pointer moved beyond threshold
+    if (clickStartPosRef.current) {
+      const moveDistance = Math.hypot(
+        event.clientX - clickStartPosRef.current.x,
+        event.clientY - clickStartPosRef.current.y,
+      );
+      if (moveDistance > 10) {
+        clearLongPressTimer();
+        interactionArmedRef.current = false;
+      }
+    }
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
     if (dragRef.current?.pointerId === event.pointerId) {
       dragRef.current = null;
     }
+
+    clearLongPressTimer();
+
+    // Click detection: must be armed, not a long-press, and model loaded
+    if (interactionArmedRef.current && !longPressTriggeredRef.current && model) {
+      const startPos = clickStartPosRef.current;
+      if (startPos) {
+        const moveDistance = Math.hypot(
+          event.clientX - startPos.x,
+          event.clientY - startPos.y,
+        );
+        // Only treat as click if pointer didn't move far (not a drag)
+        if (moveDistance <= 5) {
+          const now = Date.now();
+          if (now - lastClickTimeRef.current >= 500) {
+            lastClickTimeRef.current = now;
+            const stageEl = stageRef.current;
+            if (stageEl) {
+              const rect = stageEl.getBoundingClientRect();
+              const hitArea = detectHitArea(event.clientX, event.clientY, rect);
+              if (hitArea !== 'unknown') {
+                handleClickFeedback(hitArea, event.clientX, event.clientY, rect);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    interactionArmedRef.current = false;
+    clickStartPosRef.current = null;
+  };
+
+  const handlePointerCancel = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      dragRef.current = null;
+    }
+    clearLongPressTimer();
+    interactionArmedRef.current = false;
+    clickStartPosRef.current = null;
   };
 
   const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
@@ -278,14 +481,26 @@ export function Live2DStage({
     onSettingsChange({ ...settings, scale: clamp(nextScale, 0.12, 1.2) });
   };
 
+  // ── Context menu actions ──
+
+  const handleContextMenuAction = useCallback((tab: string) => {
+    onOpenSettings?.(tab);
+    closeContextMenu();
+  }, [onOpenSettings, closeContextMenu]);
+
+  const handleContextMenuClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+  }, []);
+
   return (
     <div
+      ref={stageRef}
       className="live2d-stage"
       data-tool={activeTool || ''}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
       onDoubleClick={onInteract}
       onWheel={handleWheel}
     >
@@ -302,6 +517,67 @@ export function Live2DStage({
           <strong>Live2D fallback</strong>
           <span>{error}</span>
         </div>
+      ) : null}
+
+      {/* Interaction bubble */}
+      {bubble ? (
+        <div
+          className={['live2d-interaction-bubble', conversationMode === 'night' ? 'is-night-mode' : ''].filter(Boolean).join(' ')}
+          style={{ left: bubble.x, top: bubble.y - 36 }}
+        >
+          {bubble.text}
+        </div>
+      ) : null}
+
+      {/* Context menu */}
+      {contextMenu ? (
+        <>
+          <div
+            className="live2d-context-menu-backdrop"
+            onClick={closeContextMenu}
+            onContextMenu={e => e.preventDefault()}
+          />
+          <div
+            className="live2d-context-menu"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={handleContextMenuClick}
+            onMouseDown={handleContextMenuClick}
+          >
+            <button
+              type="button"
+              className="live2d-context-menu-item"
+              onClick={() => handleContextMenuAction('persona')}
+            >
+              <UserRoundCog size={14} />
+              <span>角色设置</span>
+            </button>
+            <button
+              type="button"
+              className="live2d-context-menu-item"
+              onClick={() => handleContextMenuAction('mode')}
+            >
+              <SlidersHorizontal size={14} />
+              <span>情景模式</span>
+            </button>
+            <button
+              type="button"
+              className="live2d-context-menu-item"
+              onClick={() => handleContextMenuAction('appearance')}
+            >
+              <Palette size={14} />
+              <span>外观设置</span>
+            </button>
+            <div className="live2d-context-menu-divider" />
+            <button
+              type="button"
+              className="live2d-context-menu-item"
+              onClick={closeContextMenu}
+            >
+              <X size={14} />
+              <span>关闭</span>
+            </button>
+          </div>
+        </>
       ) : null}
     </div>
   );

@@ -70,29 +70,79 @@ export function MessageList({ messages }: MessageListProps) {
     );
   }
 
+  const getAvatarLetter = (message: ChatMessage) => {
+    if (message.role === 'user') return 'U';
+    if (message.character_name) return message.character_name.slice(0, 1);
+    return 'S';
+  };
+
+  const getDisplayName = (message: ChatMessage) => {
+    if (message.role === 'user') return 'You';
+    if (message.character_name) return message.character_name;
+    return 'Shinobu';
+  };
+
   return (
     <div className="message-list" ref={listRef}>
-      {messages.map(message => (
-        <article key={message.id} className={`message-row message-row-${message.role}`} data-status={message.status || ''}>
-          <div className="message-avatar">{message.role === 'user' ? 'U' : 'S'}</div>
-          <div className="message-stack">
-            <div className="message-meta">
-              <span>{message.role === 'user' ? 'You' : 'Shinobu'}</span>
-              <time>{formatTime(message.created_at)}</time>
-              {message.status === 'streaming' ? <em>streaming</em> : null}
-              {message.status === 'failed' ? <em>failed</em> : null}
-            </div>
-            <div className="message-bubble" aria-live={message.status === 'streaming' ? 'polite' : undefined}>
-              {message.image_preview_url ? (
-                <div className="message-image-preview">
-                  <img src={message.image_preview_url} alt="上传的图片" />
-                </div>
+      {messages.map(message => {
+        const isAux = message.is_auxiliary || false;
+        const rowClass = [
+          'message-row',
+          `message-row-${message.role}`,
+          isAux ? 'message-auxiliary' : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+
+        const avatarClass = [
+          'message-avatar',
+          isAux && message.role !== 'user' ? 'message-avatar-auxiliary' : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+
+        return (
+          <article
+            key={message.id}
+            className={rowClass}
+            data-status={message.status || ''}
+          >
+            <div className={avatarClass}>{getAvatarLetter(message)}</div>
+            <div className="message-stack">
+              {message.character_name && message.role !== 'user' ? (
+                <span
+                  className="message-character-name"
+                  style={{ color: message.character_color || undefined }}
+                >
+                  {message.character_name}
+                </span>
               ) : null}
-              <MessageContent content={message.content} streaming={message.status === 'streaming'} />
+              <div className="message-meta">
+                <span>{getDisplayName(message)}</span>
+                <time>{formatTime(message.created_at)}</time>
+                {message.status === 'streaming' ? <em>streaming</em> : null}
+                {message.status === 'failed' ? <em>failed</em> : null}
+              </div>
+              <div
+                className="message-bubble"
+                aria-live={
+                  message.status === 'streaming' ? 'polite' : undefined
+                }
+              >
+                {message.image_preview_url ? (
+                  <div className="message-image-preview">
+                    <img src={message.image_preview_url} alt="上传的图片" />
+                  </div>
+                ) : null}
+                <MessageContent
+                  content={message.content}
+                  streaming={message.status === 'streaming'}
+                />
+              </div>
             </div>
-          </div>
-        </article>
-      ))}
+          </article>
+        );
+      })}
     </div>
   );
 }

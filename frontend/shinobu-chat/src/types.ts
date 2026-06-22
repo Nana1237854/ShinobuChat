@@ -62,6 +62,9 @@ export type ChatMessage = ApiMessage & {
   status?: 'sending' | 'streaming' | 'sent' | 'failed';
   local?: boolean;
   image_preview_url?: string | null;
+  character_name?: string | null;
+  character_color?: string | null;
+  is_auxiliary?: boolean;
 };
 
 export type StreamEvent =
