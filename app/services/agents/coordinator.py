@@ -48,6 +48,17 @@ class AgentCoordinator:
         decision = self.resolve_route(requested_route_mode, content, history)
         memory_context = self.memory_agent.search(user_id, content)
 
+        # Persona tone instructions — injected as dynamic context, NOT base_system
+        persona_context = self._persona_tone_context(user_id)
+        if persona_context:
+            memory_context = [persona_context, *memory_context]
+
+        # Goal candidate detection — prompt to ask, never auto-create
+        from app.services.goal_service import GoalService
+
+        if GoalService.is_goal_candidate(content):
+            memory_context = [GoalService.build_goal_candidate_prompt(content), *memory_context]
+
         # Recall detection: inject memory search results + honesty instruction
         if self.memory_agent.is_recall_question(content):
             recall_results = self.memory_agent.search_for_recall(user_id, content, top_k=5)
@@ -108,6 +119,22 @@ class AgentCoordinator:
             user_skills=user_skills,
             ai_config=ai_config,
         )
+
+    @staticmethod
+    def _persona_tone_context(user_id: uuid.UUID) -> str:
+        try:
+            from app.db.session import SessionLocal
+            from app.services.persona_settings_service import PersonaSettingsService
+
+            db = SessionLocal()
+            try:
+                svc = PersonaSettingsService(db)
+                settings = svc.get_settings(user_id)
+                return svc.build_tone_instructions(settings)
+            finally:
+                db.close()
+        except Exception:
+            return ""
 
     def _detect_agent_continuation(self, content: str, history: list[Message]) -> RouterDecision | None:
         text = content.strip()

@@ -5,9 +5,11 @@ from app.api.v1.routes import (
     characters,
     conversations,
     config,
+    goals,
     live2d,
     memories,
     messages,
+    persona,
     reminders,
     sync,
     skill_market,
@@ -23,6 +25,8 @@ api_router.include_router(auth.router)
 api_router.include_router(config.router)
 api_router.include_router(skills.router)
 api_router.include_router(skill_market.router)
+api_router.include_router(persona.router)
+api_router.include_router(goals.router)
 api_router.include_router(conversations.router)
 api_router.include_router(messages.router)
 api_router.include_router(memories.router)

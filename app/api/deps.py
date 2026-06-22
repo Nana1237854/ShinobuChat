@@ -29,6 +29,8 @@ from app.services.skill_manager import SkillManager
 from app.services.skill_service import SkillRegistry
 from app.services.stream_events import SseEncoder
 from app.services.sync_service import SyncService
+from app.services.goal_service import GoalService
+from app.services.persona_settings_service import PersonaSettingsService
 from app.services.reminder_scheduler_service import ReminderSchedulerService
 from app.services.todo_service import TodoService
 from app.services.tool_registry import ToolRegistry
@@ -181,6 +183,14 @@ def get_todo_service(db: Session = Depends(get_db)) -> TodoService:
 
 def get_reminder_service(db: Session = Depends(get_db)) -> ReminderSchedulerService:
     return ReminderSchedulerService(db)
+
+
+def get_persona_service(db: Session = Depends(get_db)) -> PersonaSettingsService:
+    return PersonaSettingsService(db)
+
+
+def get_goal_service(db: Session = Depends(get_db)) -> GoalService:
+    return GoalService(db)
 
 
 def get_conversation_service(db: Session = Depends(get_db)) -> ConversationService:

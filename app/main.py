@@ -60,6 +60,22 @@ def create_app() -> FastAPI:
                     except Exception:
                         logger.exception("Reminder background scan failed")
 
+                    # Goal checkin scan
+                    try:
+                        db2 = SessionLocal()
+                        try:
+                            from app.services.goal_service import GoalService
+                            goal_svc = GoalService(db2)
+                            goal_events = goal_svc.scan_due_checkins()
+                            if goal_events:
+                                logger.info(
+                                    "Goal checkin scan produced %d events", len(goal_events)
+                                )
+                        finally:
+                            db2.close()
+                    except Exception:
+                        logger.exception("Goal checkin background scan failed")
+
             import logging
 
             logger = logging.getLogger("shinobu.reminder")
