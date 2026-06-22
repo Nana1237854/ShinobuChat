@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 REMINDER_KINDS = ("due_soon", "due_now", "snoozed", "dismissed")
 
 
-@dataclass(frozen=True)
+@dataclass
 class ReminderEvent:
     todo_id: UUID
     user_id: UUID
@@ -25,6 +25,7 @@ class ReminderEvent:
     due_at: datetime | None
     message: str
     reminder_count: int
+    delivery: str = "no_ios_device"
 
     def to_payload(self) -> dict:
         return {
@@ -35,6 +36,7 @@ class ReminderEvent:
             "due_at": self.due_at.isoformat() if self.due_at else None,
             "message": self.message,
             "reminder_count": self.reminder_count,
+            "delivery": self.delivery,
         }
 
 
@@ -206,6 +208,14 @@ class ReminderSchedulerService:
         )
 
     def _publish(self, todo: Todo, event: ReminderEvent) -> None:
+        status = realtime_sync_service.status_payload(todo.user_id)
+        if status["online_ios_devices"] > 0:
+            event.delivery = "online"
+        elif status["ios_push_targets"] > 0:
+            event.delivery = "apns_queued"
+        else:
+            event.delivery = "no_ios_device"
+
         payload = event.to_payload()
         try:
             realtime_sync_service.publish(
@@ -213,9 +223,7 @@ class ReminderSchedulerService:
                 f"reminder.{event.kind}",
                 payload,
             )
-            # Enqueue APNs for offline iOS devices
-            status = realtime_sync_service.status_payload(todo.user_id)
-            if not status["online_ios_devices"] and status["ios_push_targets"] > 0:
+            if event.delivery == "apns_queued":
                 realtime_sync_service._queue_apns_notification(
                     todo.user_id, payload
                 )

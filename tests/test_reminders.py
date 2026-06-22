@@ -195,6 +195,10 @@ class ReminderSchedulerTests(unittest.TestCase):
     def test_publish_called_on_due_event(self, mock_rt):
         now = datetime(2026, 6, 22, 10, 0, 0, tzinfo=timezone.utc)
         past = now - timedelta(minutes=10)
+        mock_rt.status_payload.return_value = {
+            "online_ios_devices": 1,
+            "ios_push_targets": 0,
+        }
         with self.Session() as db:
             db.add(self._make_todo(due_at=past, title="推送测试"))
             db.commit()

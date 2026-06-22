@@ -1,8 +1,9 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.deps import get_current_user_id, get_reminder_service
+from app.schemas.sync import ReminderSnoozeRequest
 from app.services.reminder_scheduler_service import ReminderSchedulerService
 
 router = APIRouter(prefix="/reminders", tags=["reminders"])
@@ -20,11 +21,11 @@ def get_due_reminders(
 @router.post("/{todo_id}/snooze")
 def snooze_reminder(
     todo_id: UUID,
-    minutes: int = Query(default=10, ge=1, le=1440),
+    body: ReminderSnoozeRequest,
     user_id: UUID = Depends(get_current_user_id),
     service: ReminderSchedulerService = Depends(get_reminder_service),
 ) -> dict:
-    event = service.snooze(user_id, todo_id, minutes)
+    event = service.snooze(user_id, todo_id, body.minutes)
     if event is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

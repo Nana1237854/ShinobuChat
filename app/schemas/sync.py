@@ -58,8 +58,18 @@ class TodoOut(BaseModel):
     completed: bool
     priority: int
     due_at: datetime | None
+    last_reminded_at: datetime | None = None
+    last_reminder_kind: str | None = None
+    reminder_count: int = 0
+    reminder_enabled: bool = True
+    snoozed_until: datetime | None = None
+    dismissed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class ReminderSnoozeRequest(BaseModel):
+    minutes: int = Field(default=10, ge=1, le=1440)
 
 
 class SyncChangeIn(BaseModel):
