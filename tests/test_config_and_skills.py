@@ -604,6 +604,122 @@ class UserConfigFullCoverageTests(unittest.TestCase):
         except Exception:
             self.fail("validate_encryption_key should not raise for valid key")
 
+    # --- Display vs runtime decode split ---
+
+    def test_list_fields_returns_mask_for_encrypted_when_no_key(self):
+        """list_fields (display) returns mask when key unavailable."""
+        self._encryption_patch.stop()
+        try:
+            with self.Session() as db:
+                svc = ConfigService(db)
+                svc.update(self.user_id, UserConfigPatch(ai_model="gpt-5"))
+                # Encrypted field must fail to save without key, so test display
+                # by directly inserting an encrypted row (simulating pre-key data)
+                row = UserConfig(
+                    user_id=self.user_id,
+                    field_name="ai_api_key",
+                    field_value="unreachable-encrypted-blob",
+                    encrypted=True,
+                )
+                db.add(row)
+                db.commit()
+                # list_fields should return mask for encrypted field
+                response = svc.list_fields(self.user_id)
+                ai_key = next(f for f in response.fields if f.key == "ai_api_key")
+                self.assertEqual(ai_key.value, "••••••••")
+                self.assertEqual(ai_key.source, "user")
+                self.assertTrue(ai_key.encrypted)
+                # Non-encrypted field still readable
+                ai_model = next(f for f in response.fields if f.key == "ai_model")
+                self.assertEqual(ai_model.value, "gpt-5")
+                self.assertFalse(ai_model.encrypted)
+        finally:
+            self._encryption_patch.start()
+
+    def test_resolve_runtime_raises_when_encrypted_and_no_key(self):
+        """resolve_runtime (runtime) raises ConfigurationError when encrypted field exists without key."""
+        self._encryption_patch.stop()
+        try:
+            with self.Session() as db:
+                # Insert an encrypted row directly
+                row = UserConfig(
+                    user_id=self.user_id,
+                    field_name="ai_api_key",
+                    field_value="encrypted-blob-data",
+                    encrypted=True,
+                )
+                db.add(row)
+                db.add(UserConfig(
+                    user_id=self.user_id,
+                    field_name="ai_model",
+                    field_value='"safe-model"',
+                    encrypted=False,
+                ))
+                db.commit()
+                svc = ConfigService(db)
+                from app.core.exceptions import ConfigurationError
+                with self.assertRaises(ConfigurationError) as ctx:
+                    svc.resolve_runtime(self.user_id)
+                self.assertIn("ai_api_key", str(ctx.exception))
+                self.assertIn("SC_CONFIG_ENCRYPTION_KEY is not set", str(ctx.exception))
+        finally:
+            self._encryption_patch.start()
+
+    def test_resolve_runtime_does_not_return_mask_as_api_key(self):
+        """resolve_runtime must never return '••••••••' as a real API key."""
+        self._encryption_patch.stop()
+        try:
+            with self.Session() as db:
+                row = UserConfig(
+                    user_id=self.user_id,
+                    field_name="whisper_api_key",
+                    field_value="encrypted-whisper-key",
+                    encrypted=True,
+                )
+                db.add(row)
+                db.commit()
+                svc = ConfigService(db)
+                from app.core.exceptions import ConfigurationError
+                with self.assertRaises(ConfigurationError):
+                    result = svc.resolve_runtime(self.user_id)
+                    # If it somehow doesn't raise, check it's not a mask
+                    if "whisper_api_key" in result:
+                        self.assertNotEqual(result["whisper_api_key"], "••••••••")
+                        self.assertNotIn("••••", str(result["whisper_api_key"]))
+        finally:
+            self._encryption_patch.start()
+
+    def test_non_encrypted_fields_readable_without_key(self):
+        """Non-encrypted fields are still readable via runtime decode when key is missing."""
+        self._encryption_patch.stop()
+        try:
+            with self.Session() as db:
+                db.add(UserConfig(
+                    user_id=self.user_id,
+                    field_name="ai_model",
+                    field_value='"no-key-model"',
+                    encrypted=False,
+                ))
+                db.add(UserConfig(
+                    user_id=self.user_id,
+                    field_name="edge_tts_voice",
+                    field_value='"no-key-voice"',
+                    encrypted=False,
+                ))
+                db.commit()
+                svc = ConfigService(db)
+                # resolve_runtime works when only non-encrypted fields exist
+                runtime = svc.resolve_runtime(self.user_id)
+                self.assertEqual(runtime["ai_model"], "no-key-model")
+                self.assertEqual(runtime["edge_tts_voice"], "no-key-voice")
+                # get_effective_value also works
+                self.assertEqual(
+                    svc.get_effective_value(self.user_id, "ai_model"),
+                    "no-key-model",
+                )
+        finally:
+            self._encryption_patch.start()
+
     # --- Update with None (delete) ---
 
     def test_update_with_none_deletes_config_row(self):

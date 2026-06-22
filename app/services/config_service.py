@@ -59,7 +59,7 @@ class ConfigService:
         for key, spec in CONFIG_SPECS.items():
             row = rows.get(key)
             if row is not None:
-                value = self._decode_row(row)
+                value = self._decode_row_display(row)
                 source = "user"
             else:
                 value = getattr(settings, key)
@@ -125,7 +125,7 @@ class ConfigService:
         rows = self.db.query(UserConfig).filter(UserConfig.user_id == user_id).all()
         for row in rows:
             if row.field_name in CONFIG_SPECS:
-                resolved[row.field_name] = self._decode_row(row)
+                resolved[row.field_name] = self._decode_row_runtime(row)
         return resolved
 
     def get_effective_value(self, user_id: UUID, field_name: str) -> Any:
@@ -138,7 +138,7 @@ class ConfigService:
             .first()
         )
         if row is not None:
-            return self._decode_row(row)
+            return self._decode_row_runtime(row)
         return getattr(settings, field_name)
 
     def mask_secret(self, value: Any) -> str:
@@ -168,8 +168,9 @@ class ConfigService:
     def validate_encryption_key() -> None:
         """Validate the encryption key at startup.
 
-        Development: warns if unset, allows startup but blocks encrypted field saves.
-        Production: raises ConfigurationError if key is missing.
+        Warns if SC_CONFIG_ENCRYPTION_KEY is unset. Encrypted field reads/writes
+        will be blocked until a valid key is configured. Raises ConfigurationError
+        only if the configured key has an invalid format.
         """
         configured = settings.config_encryption_key.strip()
         if not configured:
@@ -189,10 +190,14 @@ class ConfigService:
             ) from exc
 
     def _decode_row(self, row: UserConfig) -> Any:
+        """Decode a config row. Falls back to mask when encryption key is unavailable.
+
+        Prefer _decode_row_runtime() or _decode_row_display() for call-site clarity.
+        """
         raw = row.field_value
         if row.encrypted:
             if not self._encryption_available:
-                return "••••••••"  # Cannot decrypt without key
+                return "••••••••"
             try:
                 raw = self._fernet.decrypt(raw.encode("ascii")).decode("utf-8")
             except (InvalidToken, ValueError) as exc:
@@ -200,6 +205,28 @@ class ConfigService:
                     f"Encrypted configuration field '{row.field_name}' cannot be decrypted"
                 ) from exc
         return self._deserialize(raw, CONFIG_SPECS[row.field_name].value_type)
+
+    def _decode_row_runtime(self, row: UserConfig) -> Any:
+        """Decode for runtime use (resolve_runtime, get_effective_value).
+
+        Raises ConfigurationError if an encrypted field exists but the encryption
+        key is unavailable — must never return a mask that would be used as a real key.
+        """
+        if row.encrypted and not self._encryption_available:
+            raise ConfigurationError(
+                f"Cannot read encrypted field '{row.field_name}': "
+                "SC_CONFIG_ENCRYPTION_KEY is not set. "
+                "Configure a Fernet key in .env to access stored API keys."
+            )
+        return self._decode_row(row)
+
+    def _decode_row_display(self, row: UserConfig) -> Any:
+        """Decode for frontend display (list_fields).
+
+        Safe to return a mask when encryption key is unavailable — the frontend
+        shows masks for encrypted fields anyway.
+        """
+        return self._decode_row(row)
 
     def _fernet_key(self) -> bytes | None:
         """Return the Fernet key bytes, or None if not configured.
