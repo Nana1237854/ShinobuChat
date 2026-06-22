@@ -41,6 +41,7 @@ class VerifiedToolResult:
     output: str
     verified: bool
     reason: str
+    checked_fields: dict = field(default_factory=dict)
 
     def as_tool_message(self) -> str:
         return json.dumps(
@@ -48,6 +49,7 @@ class VerifiedToolResult:
                 "status": "verified" if self.verified else "verification_failed",
                 "output": self.output,
                 "verification": self.reason,
+                "checked_fields": self.checked_fields,
             },
             ensure_ascii=False,
         )
@@ -95,9 +97,10 @@ class ToolRegistry:
         from app.services.tool_verifier import ToolVerifier
 
         output = self.execute(name, arguments, context)
-        verification = ToolVerifier().verify(name, output, context)
+        verification = ToolVerifier().verify(name, output, arguments, context)
         return VerifiedToolResult(
             output=output,
             verified=verification.passed,
             reason=verification.reason,
+            checked_fields=verification.checked_fields,
         )

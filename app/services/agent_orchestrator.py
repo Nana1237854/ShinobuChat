@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Iterator
 
 from app.core.config import settings
@@ -10,6 +11,9 @@ from app.services.ai_client import AIClient
 from app.services.skill_service import Skill
 from app.services.stream_events import StreamEvent
 from app.services.tool_registry import ToolContext, ToolRegistry
+from app.services.tool_verifier import ToolVerifier, VerificationResult
+
+logger = logging.getLogger(__name__)
 
 
 class AgentOrchestrator:
@@ -22,6 +26,30 @@ class AgentOrchestrator:
         self.agent_service = agent_service
         self.tool_registry = tool_registry
         self.ai_client = ai_client
+
+    def verify_step(
+        self,
+        tool_name: str,
+        result: str,
+        arguments: dict,
+        context: ToolContext,
+    ) -> VerificationResult:
+        verification = ToolVerifier().verify(tool_name, result, arguments, context)
+        logger.info(
+            "verify_step tool=%s ok=%s reason=%s checked_fields=%s",
+            tool_name,
+            verification.ok,
+            verification.reason,
+            verification.checked_fields,
+        )
+        if not verification.ok:
+            logger.warning(
+                "Tool verification failed for %s: %s (checked: %s)",
+                tool_name,
+                verification.reason,
+                verification.checked_fields,
+            )
+        return verification
 
     def run(
         self,
@@ -80,12 +108,26 @@ class AgentOrchestrator:
                     },
                 )
                 result = self.tool_registry.execute_verified(tool_name, arguments, context)
+
+                # Run verify_step for mechanical verification record
+                verification = self.verify_step(tool_name, result.output, arguments, context)
+
                 if not result.verified:
                     yield StreamEvent(
                         "error",
                         {
                             "code": "TOOL_VERIFICATION_FAILED",
                             "hint": f"{tool_name}: {result.reason}",
+                            "checked_fields": result.checked_fields,
+                        },
+                    )
+                    yield StreamEvent(
+                        "chunk",
+                        {
+                            "delta": (
+                                "我尝试了，但没有确认成功。"
+                                f"{tool_name} 工具执行后验证失败：{result.reason}"
+                            ),
                         },
                     )
                 messages.append(
