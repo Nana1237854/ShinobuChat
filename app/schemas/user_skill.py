@@ -34,3 +34,11 @@ class UserSkillSummaryOut(BaseModel):
 
 class UserSkillDetailOut(UserSkillSummaryOut):
     content: str
+
+
+# Type aliases matching the requested naming convention
+SkillOut = UserSkillSummaryOut
+SkillDetailOut = UserSkillDetailOut
+SkillInstallRequest = UserSkillCreate
+SkillUpdateRequest = UserSkillUpdate
+SkillToggleRequest = UserSkillPatch

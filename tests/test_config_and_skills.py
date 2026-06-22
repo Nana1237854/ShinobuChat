@@ -613,5 +613,331 @@ class UserConfigFullCoverageTests(unittest.TestCase):
             self.assertGreater(len(response.fields), 0)
 
 
+class UserSkillFullCoverageTests(unittest.TestCase):
+    """Tests covering install, update, delete, enable/disable, conflict detection, catalog injection."""
+
+    def setUp(self):
+        self.engine = create_engine("sqlite:///:memory:", future=True)
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine, future=True)
+        self.user_id = uuid.uuid4()
+        with self.Session() as db:
+            db.add(
+                User(
+                    id=self.user_id,
+                    email="skilltest@example.com",
+                    hashed_password="x",
+                    display_name="SkillTest",
+                )
+            )
+            db.commit()
+
+    def tearDown(self):
+        Base.metadata.drop_all(bind=self.engine)
+
+    def _manager(self) -> SkillManager:
+        return SkillManager(self.Session())
+
+    # --- Install ---
+
+    def test_valid_skill_installs_successfully(self):
+        mgr = self._manager()
+        installed = mgr.install_text(self.user_id, VALID_SKILL)
+        self.assertEqual(installed.name, "focus-review")
+        self.assertEqual(installed.description, "Review a focus session without adding pressure.")
+        self.assertIn("Summarize the session", installed.content)
+        self.assertEqual(installed.installed_from, "text")
+        self.assertTrue(installed.enabled)
+
+    def test_missing_name_fails(self):
+        mgr = self._manager()
+        content = "---\ndescription: No name here\n---\n# Test"
+        with self.assertRaises(Exception):
+            mgr.install_text(self.user_id, content)
+
+    def test_missing_description_fails(self):
+        mgr = self._manager()
+        content = "---\nname: my-skill\n---\n# Test"
+        with self.assertRaises(Exception):
+            mgr.install_text(self.user_id, content)
+
+    def test_missing_frontmatter_fails(self):
+        mgr = self._manager()
+        with self.assertRaises(Exception):
+            mgr.install_text(self.user_id, "# Just a heading, no frontmatter")
+
+    def test_duplicate_name_fails(self):
+        mgr = self._manager()
+        mgr.install_text(self.user_id, VALID_SKILL)
+        with self.assertRaises(Exception):
+            mgr.install_text(self.user_id, VALID_SKILL)
+
+    def test_install_text_round_trip_list_and_get(self):
+        mgr = self._manager()
+        installed = mgr.install_text(self.user_id, VALID_SKILL)
+        skills = mgr.list(self.user_id)
+        self.assertEqual(len(skills), 1)
+        fetched = mgr.get(self.user_id, installed.id)
+        self.assertEqual(fetched.name, "focus-review")
+        self.assertEqual(fetched.content, VALID_SKILL.strip() + "\n")
+
+    # --- Conflict with built-in ---
+
+    def test_conflict_with_builtin_skill_fails(self):
+        mgr = self._manager()
+        # "web_search_aggregator" is a built-in skill name
+        conflict_skill = """---
+name: web_search_aggregator
+description: Try to override a built-in skill.
+---
+# Conflict test
+"""
+        from app.core.exceptions import ConflictError
+
+        with self.assertRaises(ConflictError):
+            mgr.install_text(self.user_id, conflict_skill)
+
+    # --- Enable / Disable ---
+
+    def test_disabled_skill_not_in_runtime(self):
+        mgr = self._manager()
+        installed = mgr.install_text(self.user_id, VALID_SKILL)
+        mgr.set_enabled(self.user_id, installed.id, False)
+        runtime = mgr.runtime_skills(self.user_id)
+        self.assertEqual(len(runtime), 0)
+
+    def test_enabled_skill_appears_in_runtime(self):
+        mgr = self._manager()
+        installed = mgr.install_text(self.user_id, VALID_SKILL)
+        runtime = mgr.runtime_skills(self.user_id)
+        self.assertEqual(len(runtime), 1)
+        self.assertEqual(runtime[0].name, "focus-review")
+
+    def test_re_enable_after_disable(self):
+        mgr = self._manager()
+        installed = mgr.install_text(self.user_id, VALID_SKILL)
+        mgr.set_enabled(self.user_id, installed.id, False)
+        self.assertEqual(len(mgr.runtime_skills(self.user_id)), 0)
+        mgr.set_enabled(self.user_id, installed.id, True)
+        self.assertEqual(len(mgr.runtime_skills(self.user_id)), 1)
+
+    # --- Delete ---
+
+    def test_delete_removes_skill(self):
+        mgr = self._manager()
+        installed = mgr.install_text(self.user_id, VALID_SKILL)
+        mgr.delete(self.user_id, installed.id)
+        self.assertEqual(len(mgr.list(self.user_id)), 0)
+        self.assertEqual(len(mgr.runtime_skills(self.user_id)), 0)
+
+    def test_delete_nonexistent_raises(self):
+        mgr = self._manager()
+        fake_id = uuid.uuid4()
+        with self.assertRaises(Exception):
+            mgr.delete(self.user_id, fake_id)
+
+    # --- Update ---
+
+    def test_update_skill_content(self):
+        mgr = self._manager()
+        installed = mgr.install_text(self.user_id, VALID_SKILL)
+        updated_content = """---
+name: focus-review-v2
+description: An updated focus review skill.
+keywords: [focus-v2, 专注v2]
+---
+# Focus review v2
+Updated instructions.
+"""
+        updated = mgr.update(self.user_id, installed.id, updated_content)
+        self.assertEqual(updated.name, "focus-review-v2")
+        self.assertIn("Updated instructions", updated.content)
+        self.assertEqual(updated.description, "An updated focus review skill.")
+
+    # --- Catalog / Prompt ---
+
+    def test_build_skill_directory_prompt(self):
+        mgr = self._manager()
+        mgr.install_text(self.user_id, VALID_SKILL)
+        prompt = mgr.build_skill_directory_prompt(self.user_id)
+        self.assertIn("focus-review", prompt)
+        self.assertIn("Review a focus session", prompt)
+        self.assertNotIn("Summarize the session", prompt)  # full content NOT in directory
+
+    def test_build_skill_directory_prompt_empty_when_no_skills(self):
+        mgr = self._manager()
+        prompt = mgr.build_skill_directory_prompt(self.user_id)
+        self.assertEqual(prompt, "")
+
+    def test_runtime_skills_only_enabled(self):
+        mgr = self._manager()
+        mgr.install_text(self.user_id, VALID_SKILL)
+        skill2 = """---
+name: second-skill
+description: A second test skill.
+---
+# Second
+Content here.
+"""
+        mgr.install_text(self.user_id, skill2)
+        all_skills = mgr.list(self.user_id)
+        mgr.set_enabled(self.user_id, all_skills[0].id, False)
+        runtime = mgr.runtime_skills(self.user_id)
+        self.assertEqual(len(runtime), 1)
+        self.assertEqual(runtime[0].name, "second-skill")
+
+    # --- SkillRegistry with user skills ---
+
+    def test_render_catalog_includes_user_skills(self):
+        mgr = self._manager()
+        mgr.install_text(self.user_id, VALID_SKILL)
+        runtime = mgr.runtime_skills(self.user_id)
+
+        registry = SkillRegistry(Path("skills"))
+        catalog = registry.render_catalog(extra_skills=runtime)
+        self.assertIn("focus-review", catalog)
+        self.assertIn("Review a focus session", catalog)
+        self.assertNotIn("Summarize the session", catalog)
+
+    def test_render_catalog_builtin_takes_precedence(self):
+        """User skill with same name as built-in should not appear in catalog
+        (blocked by _check_builtin_conflict at install time).
+        When catalog renders, built-in takes precedence."""
+        registry = SkillRegistry(Path("skills"))
+        # Simulate a user skill that somehow has a built-in name
+        rogue = Skill(
+            name="web_search_aggregator",
+            description="User's rogue override",
+            content="bad content",
+            keywords=(),
+        )
+        catalog = registry.render_catalog(extra_skills=[rogue])
+        # The built-in description should appear, not the user's
+        self.assertIn("web_search_aggregator", catalog)
+        self.assertNotIn("User's rogue override", catalog)
+
+    def test_describe_for_llm_includes_user_skills(self):
+        registry = SkillRegistry(Path("skills"))
+        user_skills = [
+            Skill(
+                name="user-skill-1",
+                description="First user skill",
+                content="Full content 1",
+                keywords=("test",),
+            ),
+            Skill(
+                name="user-skill-2",
+                description="Second user skill",
+                content="Full content 2",
+                keywords=(),
+            ),
+        ]
+        description = registry.describe_for_llm(user_skills=user_skills)
+        self.assertIn("User-Installed Skills", description)
+        self.assertIn("user-skill-1", description)
+        self.assertIn("First user skill", description)
+        self.assertIn("user-skill-2", description)
+        self.assertNotIn("Full content 1", description)
+        self.assertNotIn("Full content 2", description)
+
+    def test_describe_for_llm_no_user_skills(self):
+        registry = SkillRegistry(Path("skills"))
+        description = registry.describe_for_llm()
+        self.assertNotIn("User-Installed Skills", description)
+
+    # --- install_from_file ---
+
+    def test_install_from_file_succeeds(self):
+        mgr = self._manager()
+        installed = mgr.install_from_file(
+            self.user_id,
+            VALID_SKILL.encode("utf-8"),
+            filename="focus-review.md",
+        )
+        self.assertEqual(installed.name, "focus-review")
+        self.assertEqual(installed.installed_from, "file")
+        self.assertIsNone(installed.source_url)
+
+    def test_install_from_file_rejects_non_utf8(self):
+        mgr = self._manager()
+        with self.assertRaises(Exception):
+            mgr.install_from_file(self.user_id, b"\xff\xfe\x00\x01")
+
+    # --- Keywords ---
+
+    def test_keywords_are_parsed_and_stored(self):
+        mgr = self._manager()
+        installed = mgr.install_text(self.user_id, VALID_SKILL)
+        self.assertIn("focus", installed.keywords)
+        self.assertIn("专注", installed.keywords)
+
+    # --- User scoping ---
+
+    def test_skills_are_scoped_to_user(self):
+        other_id = uuid.uuid4()
+        with self.Session() as db:
+            db.add(
+                User(
+                    id=other_id,
+                    email="other-skill@example.com",
+                    hashed_password="x",
+                    display_name="OtherSkill",
+                )
+            )
+            db.commit()
+
+        mgr = self._manager()
+        mgr.install_text(self.user_id, VALID_SKILL)
+        self.assertEqual(len(mgr.list(self.user_id)), 1)
+        self.assertEqual(len(mgr.list(other_id)), 0)
+
+    # --- Invalid YAML frontmatter ---
+
+    def test_invalid_yaml_frontmatter_fails(self):
+        mgr = self._manager()
+        bad_yaml = """---
+name: [unclosed
+description: Bad YAML
+---
+# Bad skill
+"""
+        with self.assertRaises(Exception):
+            mgr.install_text(self.user_id, bad_yaml)
+
+    # --- install_from_url fetches and installs ---
+
+    def test_install_from_url_success(self):
+        from unittest.mock import patch
+
+        mgr = self._manager()
+
+        class FakeResponse:
+            body = VALID_SKILL.encode("utf-8")
+
+        class FakeClient:
+            def request_bytes(self, url, timeout=30):
+                return FakeResponse()
+
+        with patch(
+            "app.services.http_client.UrllibHttpClient",
+            return_value=FakeClient(),
+        ):
+            installed = mgr.install_from_url(
+                self.user_id,
+                "https://raw.githubusercontent.com/user/repo/main/SKILL.md",
+            )
+        self.assertEqual(installed.name, "focus-review")
+        self.assertEqual(installed.installed_from, "url")
+        self.assertEqual(
+            installed.source_url,
+            "https://raw.githubusercontent.com/user/repo/main/SKILL.md",
+        )
+
+    def test_install_from_url_invalid_scheme_fails(self):
+        mgr = self._manager()
+        with self.assertRaises(Exception):
+            mgr.install_from_url(self.user_id, "file:///etc/passwd")
+
+
 if __name__ == "__main__":
     unittest.main()

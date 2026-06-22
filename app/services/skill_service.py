@@ -44,13 +44,45 @@ class SkillRegistry:
         return matches
 
     def render_catalog(self, extra_skills: list[Skill] | None = None) -> str:
-        merged = {skill.name: skill for skill in self._skills.values()}
+        """Render skill catalog with names and descriptions only (no full content).
+
+        Built-in skills take precedence over user skills to prevent override.
+        """
+        merged: dict[str, Skill] = {}
+        # Add user skills first, so built-in skills overwrite on conflict
         for skill in extra_skills or []:
+            merged[skill.name] = skill
+        # Built-in skills take priority
+        for skill in self._skills.values():
             merged[skill.name] = skill
         return "\n".join(
             f"- {skill.name}: {skill.description}"
             for skill in sorted(merged.values(), key=lambda item: item.name)
         )
+
+    def describe_for_llm(self, user_skills: list[Skill] | None = None) -> str:
+        """Describe available skills for LLM decision context.
+
+        Includes built-in skills with trigger examples, plus user skill directory.
+        Only names and descriptions — never full skill content.
+        """
+        lines: list[str] = []
+        if self._skills:
+            for skill in sorted(self._skills.values(), key=lambda s: s.name):
+                triggers = ", ".join(
+                    f'"{trigger}"' for trigger in skill.keywords[:3]
+                )
+                lines.append(f"- {skill.name}: {skill.description}")
+                if triggers:
+                    lines.append(f"  Trigger examples: {triggers}")
+        if user_skills:
+            lines.append("")
+            lines.append("【User-Installed Skills】")
+            for skill in sorted(user_skills, key=lambda s: s.name):
+                lines.append(f"- {skill.name}: {skill.description}")
+        if not lines:
+            return "No skills available."
+        return "\n".join(lines)
 
     def _load(self) -> dict[str, Skill]:
         skills: dict[str, Skill] = {}

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from uuid import UUID
 
 import yaml
@@ -12,6 +14,8 @@ from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.core.time import local_now
 from app.models.user_skill import UserSkill
 from app.services.skill_service import Skill
+
+logger = logging.getLogger(__name__)
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
 
@@ -46,15 +50,24 @@ class SkillManager:
             raise NotFoundError("Skill not found")
         return skill
 
-    def install_text(self, user_id: UUID, content: str) -> UserSkill:
+    def install_text(
+        self,
+        user_id: UUID,
+        content: str,
+        *,
+        installed_from: str = "text",
+        source_url: str | None = None,
+    ) -> UserSkill:
         parsed = self.parse(content)
+        self._check_builtin_conflict(parsed.name)
         skill = UserSkill(
             user_id=user_id,
             name=parsed.name,
             description=parsed.description,
             content=parsed.content,
             keywords=list(parsed.keywords),
-            installed_from="text",
+            installed_from=installed_from,
+            source_url=source_url,
         )
         self.db.add(skill)
         try:
@@ -106,6 +119,57 @@ class SkillManager:
             for skill in self.list(user_id)
             if skill.enabled
         ]
+
+    def install_from_url(self, user_id: UUID, url: str) -> UserSkill:
+        """Fetch a SKILL.md from a URL and install it."""
+        from urllib.parse import urlparse
+
+        from app.services.http_client import UrllibHttpClient
+
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            raise BadRequestError("Skill URL must use http or https")
+
+        client = UrllibHttpClient()
+        try:
+            response = client.request_bytes(url, timeout=30)
+        except Exception as exc:
+            raise BadRequestError(f"Failed to fetch skill from URL: {exc}") from exc
+
+        content = response.body.decode("utf-8", errors="replace")
+        return self.install_text(user_id, content, installed_from="url", source_url=url)
+
+    def install_from_file(self, user_id: UUID, file_bytes: bytes, filename: str = "") -> UserSkill:
+        """Install a SKILL.md from uploaded file bytes."""
+        try:
+            content = file_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise BadRequestError("Skill file must be UTF-8 encoded") from exc
+
+        return self.install_text(
+            user_id, content, installed_from="file", source_url=None
+        )
+
+    def build_skill_directory_prompt(self, user_id: UUID) -> str:
+        """Build a prompt snippet listing enabled user skill names and descriptions only."""
+        skills = self.runtime_skills(user_id)
+        if not skills:
+            return ""
+        return "\n".join(
+            f"- {skill.name}: {skill.description}"
+            for skill in sorted(skills, key=lambda s: s.name)
+        )
+
+    def _check_builtin_conflict(self, name: str) -> None:
+        """Raise ConflictError if the name conflicts with a built-in skill."""
+        from app.services.skill_service import SkillRegistry
+
+        builtin = SkillRegistry(Path(__file__).resolve().parents[2] / "skills")
+        if builtin.get(name) is not None:
+            raise ConflictError(
+                f"Skill name '{name}' conflicts with a built-in system skill. "
+                "User skills cannot override built-in skills. Choose a different name."
+            )
 
     def parse(self, content: str) -> ParsedSkill:
         normalized = content.replace("\r\n", "\n").strip()
