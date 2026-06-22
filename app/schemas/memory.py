@@ -19,7 +19,7 @@ class MemoryCreate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     content: str = Field(min_length=1, max_length=4000)
     source: str = Field(default="manual", min_length=1, max_length=50)
-    importance: int = Field(default=2, ge=1, le=5)
+    importance: float = Field(default=0.5, ge=0.0, le=1.0)
     pinned: bool = False
     tags: list[str] = Field(default_factory=list, max_length=12)
     emotion_label: str | None = Field(default=None, max_length=60)
@@ -32,7 +32,7 @@ class MemoryUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=120)
     content: str | None = Field(default=None, min_length=1, max_length=4000)
     source: str | None = Field(default=None, min_length=1, max_length=50)
-    importance: int | None = Field(default=None, ge=1, le=5)
+    importance: float | None = Field(default=None, ge=0.0, le=1.0)
     pinned: bool | None = None
     tags: list[str] | None = Field(default=None, max_length=12)
     emotion_label: str | None = Field(default=None, max_length=60)
@@ -70,7 +70,7 @@ class MemoryOut(BaseModel):
     title: str
     content: str
     source: str
-    importance: int
+    importance: float
     pinned: bool
     tags: list[str]
     emotion_label: str | None
@@ -89,3 +89,44 @@ class MemorySearchHit(BaseModel):
     memory: MemoryOut
     similarity: float
     distance: float
+
+
+# ---- Timeline / Context / Search Result schemas ----
+
+class MemoryTimelineItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    memory_id: UUID
+    content: str
+    importance: float
+    created_at: datetime
+    source_msg_id: UUID | None = None
+    related_conversation_id: UUID | None = None
+    tags: list[str] = []
+    time_bucket: str = "earlier"
+
+
+class MemorySearchResultOut(BaseModel):
+    memory_id: UUID
+    content: str
+    importance: float
+    created_at: datetime
+    source_msg_id: UUID | None = None
+    related_conversation_id: UUID | None = None
+    score: float | None = None
+    source_message_summary: str | None = None
+
+
+class MemoryContextMessageOut(BaseModel):
+    id: UUID
+    role: str
+    content: str
+    created_at: datetime
+
+
+class MemoryContextOut(BaseModel):
+    memory_id: UUID
+    source_msg_id: UUID | None = None
+    conversation_id: UUID | None = None
+    messages: list[MemoryContextMessageOut] = []
+    detail: str | None = None

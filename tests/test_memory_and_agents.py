@@ -225,6 +225,18 @@ class FakeMemoryAgent:
     def search(self, user_id, query):
         return self.memories
 
+    @staticmethod
+    def is_recall_question(content: str) -> bool:
+        return False
+
+    def search_for_recall(self, user_id, content, top_k=5):
+        return self.memories[:top_k]
+
+    def build_recall_context(self, memories):
+        if not memories:
+            return "未找到相关长期记忆。"
+        return "\n".join(memories)
+
 
 class FakeTaskAgent:
     def __init__(self):

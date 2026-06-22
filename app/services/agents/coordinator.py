@@ -47,6 +47,15 @@ class AgentCoordinator:
     ) -> AgentPlan:
         decision = self.resolve_route(requested_route_mode, content, history)
         memory_context = self.memory_agent.search(user_id, content)
+
+        # Recall detection: inject memory search results + honesty instruction
+        if self.memory_agent.is_recall_question(content):
+            recall_results = self.memory_agent.search_for_recall(user_id, content, top_k=5)
+            if recall_results:
+                memory_context = [self.memory_agent.build_recall_context(recall_results), *memory_context]
+            else:
+                memory_context = ["用户询问了之前的记忆，但未找到相关长期记忆。请诚实说明没有找到，不要编造。", *memory_context]
+
         if decision.target is RouteMode.CHAT:
             messages = self.chat_agent.build_messages(content, history, memory_context)
             progress_events: list[StreamEvent] = []

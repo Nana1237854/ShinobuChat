@@ -10,6 +10,7 @@ from typing import Callable
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.exceptions import NotFoundError
 from app.db.session import SessionLocal
 from app.models.memory import Memory, Vector
 from app.schemas.message import MessageRole
@@ -21,6 +22,23 @@ from app.services.embedding_service import EmbeddingService
 class MemoryCandidate:
     content: str
     importance: float = 0.5
+
+
+@dataclass(frozen=True)
+class MemoryContextMessage:
+    id: uuid.UUID
+    role: str
+    content: str
+    created_at: object
+
+
+@dataclass(frozen=True)
+class SimpleMemoryContext:
+    memory_id: uuid.UUID
+    source_msg_id: uuid.UUID | None
+    conversation_id: uuid.UUID | None
+    messages: list[MemoryContextMessage]
+    detail: str | None
 
 
 class MemoryService:
@@ -187,6 +205,200 @@ class MemoryService:
                 score = 0.5
             candidates.append(MemoryCandidate(memory_content, score))
         return candidates
+
+    # ---- CRUD methods for routes ----
+
+    def create(self, payload) -> Memory:
+        """Create a memory from MemoryCreate schema."""
+        from app.models.memory import Memory as MemoryModel
+
+        embedding = None
+        if self.enabled:
+            embedding = self.embedding_service.embed(payload.content)
+            if not embedding:
+                embedding = [0.0] * settings.memory_embedding_dimensions
+        else:
+            embedding = [0.0] * settings.memory_embedding_dimensions
+
+        memory = MemoryModel(
+            user_id=payload.user_id,
+            category=payload.category.value if hasattr(payload.category, 'value') else str(payload.category),
+            title=payload.title,
+            content=payload.content,
+            source=payload.source,
+            embedding=embedding,
+            importance=float(payload.importance),
+            pinned=payload.pinned,
+            tags=payload.tags or [],
+            emotion_label=payload.emotion_label,
+            inferred=payload.inferred,
+            confidence=float(payload.confidence),
+        )
+        with self.session_factory() as db:
+            db.add(memory)
+            db.commit()
+            db.refresh(memory)
+            db.expunge(memory)
+        return memory
+
+    def list_by_user(self, user_id, category=None, include_archived=False) -> list:
+        with self.session_factory() as db:
+            query = db.query(Memory).filter(Memory.user_id == user_id)
+            if category is not None:
+                cat_val = category.value if hasattr(category, 'value') else str(category)
+                query = query.filter(Memory.category == cat_val)
+            if not include_archived:
+                query = query.filter(Memory.archived.is_(False))
+            results = query.order_by(Memory.created_at.desc()).all()
+            for item in results:
+                db.expunge(item)
+            return results
+
+    def search(self, payload) -> list:
+        """Search memories via embedding + optional filters."""
+        embeddings = self.search_memories(
+            user_id=payload.user_id,
+            query=payload.query,
+            top_k=payload.limit,
+        )
+        from app.schemas.memory import MemoryOut, MemorySearchHit
+
+        results: list = []
+        with self.session_factory() as db:
+            for mem in embeddings:
+                if payload.category and mem.category != (payload.category.value if hasattr(payload.category, 'value') else payload.category):
+                    continue
+                if payload.include_archived is False and mem.archived:
+                    continue
+                db.expunge(mem)
+                results.append(MemorySearchHit(
+                    memory=MemoryOut.model_validate(mem),
+                    similarity=0.0,
+                    distance=0.0,
+                ))
+        return results[:payload.limit]
+
+    def update(self, memory_id, user_id, payload) -> Memory:
+        with self.session_factory() as db:
+            mem = db.query(Memory).filter(Memory.id == memory_id, Memory.user_id == user_id).first()
+            if mem is None:
+                raise NotFoundError("Memory not found")
+            for key, value in payload.model_dump(exclude_unset=True).items():
+                if hasattr(mem, key):
+                    setattr(mem, key, value)
+            db.add(mem)
+            db.commit()
+            db.refresh(mem)
+            db.expunge(mem)
+        return mem
+
+    def undo_inference(self, memory_id, user_id) -> Memory:
+        with self.session_factory() as db:
+            mem = db.query(Memory).filter(Memory.id == memory_id, Memory.user_id == user_id).first()
+            if mem is None:
+                raise NotFoundError("Memory not found")
+            mem.inferred = False
+            db.add(mem)
+            db.commit()
+            db.refresh(mem)
+            db.expunge(mem)
+        return mem
+
+    def delete(self, memory_id, user_id) -> None:
+        with self.session_factory() as db:
+            mem = db.query(Memory).filter(Memory.id == memory_id, Memory.user_id == user_id).first()
+            if mem is None:
+                raise NotFoundError("Memory not found")
+            db.delete(mem)
+            db.commit()
+
+    def get_preferences(self, user_id):
+        from app.models.memory import MemoryPreference
+
+        with self.session_factory() as db:
+            pref = db.query(MemoryPreference).filter(MemoryPreference.user_id == user_id).first()
+            if pref is None:
+                return MemoryPreference(user_id=user_id, enabled=True)
+            db.expunge(pref)
+            return pref
+
+    def update_preferences(self, user_id, payload):
+        from app.models.memory import MemoryPreference
+
+        with self.session_factory() as db:
+            pref = db.query(MemoryPreference).filter(MemoryPreference.user_id == user_id).first()
+            if pref is None:
+                pref = MemoryPreference(user_id=user_id, enabled=payload.enabled)
+                db.add(pref)
+            else:
+                pref.enabled = payload.enabled
+            db.commit()
+            if hasattr(db, 'refresh'):
+                db.refresh(pref)
+            if hasattr(db, 'expunge'):
+                db.expunge(pref)
+            return pref
+
+    # ---- Timeline / Context ----
+
+    def list_timeline(self, user_id, limit: int = 50, offset: int = 0) -> list:
+        with self.session_factory() as db:
+            results = (
+                db.query(Memory)
+                .filter(Memory.user_id == user_id, Memory.archived.is_(False))
+                .order_by(Memory.created_at.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            for item in results:
+                db.expunge(item)
+            return results
+
+    def get_memory_context(self, user_id, memory_id, window: int = 3):
+        window = max(1, min(window, 10))
+        with self.session_factory() as db:
+            mem = db.query(Memory).filter(Memory.id == memory_id, Memory.user_id == user_id).first()
+            if mem is None:
+                raise NotFoundError("Memory not found")
+
+            if mem.source_msg_id is None:
+                return SimpleMemoryContext(memory_id=mem.id, source_msg_id=None, conversation_id=None, messages=[], detail="source context unavailable")
+
+            from app.models.message import Message
+
+            source_msg = db.query(Message).filter(Message.id == mem.source_msg_id).first()
+            if source_msg is None:
+                return SimpleMemoryContext(memory_id=mem.id, source_msg_id=mem.source_msg_id, conversation_id=None, messages=[], detail="source message not found")
+
+            conversation_id = source_msg.conversation_id
+            before = (
+                db.query(Message)
+                .filter(Message.conversation_id == conversation_id, Message.created_at < source_msg.created_at)
+                .order_by(Message.created_at.desc())
+                .limit(window)
+                .all()[::-1]
+            )
+            after = (
+                db.query(Message)
+                .filter(Message.conversation_id == conversation_id, Message.created_at > source_msg.created_at)
+                .order_by(Message.created_at.asc())
+                .limit(window)
+                .all()
+            )
+            all_msgs = before + [source_msg] + after
+            for msg in all_msgs:
+                db.expunge(msg)
+            return SimpleMemoryContext(
+                memory_id=mem.id,
+                source_msg_id=mem.source_msg_id,
+                conversation_id=conversation_id,
+                messages=[
+                    MemoryContextMessage(id=msg.id, role=msg.role, content=msg.content, created_at=msg.created_at)
+                    for msg in all_msgs
+                ],
+                detail=None,
+            )
 
     def _can_use_pgvector(self, db: Session) -> bool:
         return Vector is not None and db.bind is not None and db.bind.dialect.name == "postgresql"
