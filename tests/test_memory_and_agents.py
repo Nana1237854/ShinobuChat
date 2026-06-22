@@ -1,5 +1,6 @@
 import uuid
 import unittest
+from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -170,17 +171,41 @@ class AgentCoordinatorTests(unittest.TestCase):
         task_agent = FakeTaskAgent()
         coordinator = AgentCoordinator(RouterAgent(), ChatAgent(), task_agent, memory_agent)
 
+        # Mock persona context to empty so the test focuses on memory injection
+        with patch.object(
+            AgentCoordinator,
+            "_persona_tone_context",
+            staticmethod(lambda user_id: ""),
+        ):
+            plan = coordinator.prepare(
+                requested_route_mode=RouteMode.AUTO,
+                user_id=uuid.uuid4(),
+                content="帮我查询今天香港天气",
+                history=[],
+            )
+
+        self.assertEqual(plan.route_mode, RouteMode.AGENT)
+        self.assertIn("用户喜欢抹茶", plan.memory_context)
+        self.assertIn("用户喜欢抹茶", str(plan.messages))
+        self.assertEqual(plan.progress_events[0].event, "progress")
+
+    def test_prepare_injects_persona_context(self):
+        """Persona tone context is prepended to memory_context when available."""
+        memory_agent = FakeMemoryAgent(["用户喜欢抹茶"])
+        task_agent = FakeTaskAgent()
+        coordinator = AgentCoordinator(RouterAgent(), ChatAgent(), task_agent, memory_agent)
+
         plan = coordinator.prepare(
             requested_route_mode=RouteMode.AUTO,
             user_id=uuid.uuid4(),
-            content="帮我查询今天香港天气",
+            content="你好",
             history=[],
         )
 
-        self.assertEqual(plan.route_mode, RouteMode.AGENT)
-        self.assertEqual(plan.memory_context, ["用户喜欢抹茶"])
-        self.assertIn("用户喜欢抹茶", str(plan.messages))
-        self.assertEqual(plan.progress_events[0].event, "progress")
+        self.assertEqual(plan.route_mode, RouteMode.CHAT)
+        # Persona context should be first element when memory context is non-empty
+        self.assertGreaterEqual(len(plan.memory_context), 2)
+        self.assertIn("用户喜欢抹茶", plan.memory_context)
 
     def test_manual_chat_override_skips_task_agent(self):
         memory_agent = FakeMemoryAgent([])

@@ -21,4 +21,4 @@ def analyze_emotion(
         recent_user_messages=truncated_recent,
         local_hour=payload.local_hour,
     )
-    return EmotionAnalyzeResponse.model_validate(result)
+    return result.model_dump()

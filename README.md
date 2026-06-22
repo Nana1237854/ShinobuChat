@@ -23,6 +23,14 @@ python -m pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+On Windows, `--reload` may not detect file changes out of the box. If auto-reload doesn't trigger, use explicit reload scoping:
+
+```powershell
+python -m uvicorn app.main:app --reload --reload-dir D:\ShinobuChat\app --reload-include "*.py"
+```
+
+If it still doesn't trigger, restart the backend manually (`Ctrl+C` then re-run).
+
 The API health endpoint is `http://127.0.0.1:8000/health`. Application startup initializes the database schema, so PostgreSQL must be reachable through `SC_DATABASE_URL`.
 
 ## Frontend
