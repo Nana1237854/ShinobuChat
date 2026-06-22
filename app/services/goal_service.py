@@ -59,12 +59,15 @@ class GoalService:
                 goal.status = value
                 if value == "paused":
                     goal.paused_at = now
+                    goal.completed_at = None
                 elif value == "active":
                     goal.paused_at = None
+                    goal.completed_at = None
                     if goal.next_check_at is None:
                         goal.next_check_at = now + timedelta(days=goal.cadence_days)
                 elif value == "completed":
                     goal.completed_at = now
+                    goal.paused_at = None
             elif key == "cadence_days" and value is not None:
                 goal.cadence_days = value
                 goal.next_check_at = now + timedelta(days=value)
@@ -84,6 +87,8 @@ class GoalService:
 
     def checkin_goal(self, user_id: UUID, goal_id: UUID, note: str | None = None) -> dict:
         goal = self._get_user_goal(user_id, goal_id)
+        if goal.status == "completed":
+            raise NotFoundError("Cannot check in a completed goal")
         now = datetime.now(timezone.utc)
         goal.last_checked_at = now
         goal.next_check_at = now + timedelta(days=goal.cadence_days)
@@ -134,6 +139,7 @@ class GoalService:
             "title": goal.title,
             "category": goal.category,
             "status": goal.status,
+            "checked": kind == "logged",
             "next_check_at": goal.next_check_at.isoformat() if goal.next_check_at else None,
             "message": (
                 f"今天要不要简单回顾一下「{goal.title}」的进展？不用有压力，告诉我一点点也可以。"

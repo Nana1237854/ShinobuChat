@@ -261,9 +261,10 @@ class GoalServiceTests(unittest.TestCase):
     def test_checkin_goal_user_action(self):
         svc = self._svc()
         goal = svc.create_goal(self.user_id, self._create_payload(title="手动打卡"))
-        result = svc.checkin_goal(self.user_id, goal.id, note="今天学了1小时")
+        result = svc.checkin_goal(self.user_id, goal.id)
         self.assertEqual(result["type"], "goal.logged")
         self.assertIn("已记录", result["message"])
+        self.assertTrue(result["checked"])
 
     # 15. iOS offline writes to APNs outbox
     @patch("app.services.goal_service.realtime_sync_service")

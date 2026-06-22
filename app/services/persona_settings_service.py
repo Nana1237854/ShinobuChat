@@ -40,12 +40,14 @@ class PersonaSettingsService:
         )
         if row is not None:
             return row
+        now = datetime.now(timezone.utc)
         return UserPersonaSettings(
             user_id=user_id,
             verbosity="balanced",
             warmth="warm",
             initiative="balanced",
             work_style="casual",
+            updated_at=now,
         )
 
     def update_settings(self, user_id: UUID, payload) -> UserPersonaSettings:

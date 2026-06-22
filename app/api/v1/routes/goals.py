@@ -54,12 +54,11 @@ def delete_goal(
 @router.post("/{goal_id}/checkin", response_model=GoalCheckinOut)
 def checkin_goal(
     goal_id: UUID,
-    note: str | None = Query(default=None, max_length=500),
     user_id: UUID = Depends(get_current_user_id),
     service: GoalService = Depends(get_goal_service),
 ) -> GoalCheckinOut:
     try:
-        result = service.checkin_goal(user_id, goal_id, note=note)
+        result = service.checkin_goal(user_id, goal_id)
         return GoalCheckinOut(**result)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
