@@ -483,3 +483,56 @@
   - Live2DStage 中 emotion/motion 应用失败使用 console.warn，非关键特性，生产构建会被 tree-shake
 - 是否可以进入下一阶段
   - 是
+
+## F19
+- 验收结论
+  - 构建检查：`npm run build` 通过（tsc -b + vite build，2.92s，0 错误 0 警告）；`npm run typecheck` 通过
+  - 情景模式：ModeSwitch 显示 4 种模式，切换调接口，失败回滚；focus 下 emotion-hint 抑制 + Live2D 仅 head 可点击；work 下 placeholder 任务导向
+  - 多模态输入：图片上传按钮可见，非图片被拒绝，预览/移除正常，可附带问题，analyzeImage 调 F11 接口，失败不伪造成功，不写 localStorage
+  - Shinobu 日记：DiaryPanel 在 SettingsPage 可打开，日历网格 + 列表 + 详情完整，生成按钮可调用 API，空状态/隐私提示均存在
+  - Live2D 交互：点击 head/body/hand 有反馈（body 克制），长按菜单含角色设置/情景模式/外观设置/关闭，无 model 不崩溃，点击不影响聊天状态
+  - 群聊角色：CharacterPanel 默认只有 Shinobu（主角色不可移除），可添加/移除辅助角色（上限 3），MessageList 渲染角色名和颜色，后端未完成时 disabled 提示
+  - 旧功能回归：SettingsPage 9 个 Tab 正常；ConfigPanel/SkillPanel/ReminderBubble/MemoryTimelinePanel/GoalTrackerPanel 无回归；纯文本聊天正常；Live2D 原有交互正常
+- 安全与隐私
+  - console.log：0 处（全部 src 已清除调试日志）
+  - dangerouslySetInnerHTML：0 处
+  - localStorage：5 处全部为非敏感数据（route-mode、conversation-id、device-key、pet-settings、session 已迁移 sessionStorage）
+  - base64：仅用于 TTS 音频解码和 JWT payload 解析，无图片 base64 持久化
+  - eval：0 处
+  - 图片不写 Memory，辅助角色不写长期记忆，日记遵守后端 privacy 设置
+- 新增文件清单
+  - `src/api/modes.ts`, `src/api/vision.ts`, `src/api/diaries.ts`, `src/api/characters.ts`, `src/api/interactions.ts` (F11)
+  - `src/modes/ModeSwitch.tsx` (F12)
+  - `src/diaries/DiaryPanel.tsx` (F14)
+  - `src/characters/CharacterPanel.tsx`, `src/characters/presets.ts` (F16)
+- 修改文件清单
+  - `src/types.ts`：新增 ~20 个类型定义（ConversationMode、Vision*、Diary*、Live2D*、CharacterProfile、ChatMessage 扩展字段等）
+  - `src/App.tsx`：conversationMode 状态 + 加载、sendText 扩展支持 imageFile、formatVisionResponse、Live2D onOpenSettings、focus mode 联动
+  - `src/chat/Composer.tsx`：图片上传按钮、预览、验证、conversationMode placeholder
+  - `src/chat/MessageList.tsx`：图片消息渲染、多角色消息渲染（character_name/color/auxiliary）
+  - `src/live2d/Live2DStage.tsx`：hit test、点击气泡反馈、长按菜单、mode 感知
+  - `src/settings/SettingsPage.tsx`：新增 mode/diaries/characters 三个 Tab（共 9 个）
+  - `src/styles.css`：新增 ~1000 行样式（mode、image、diary、Live2D interaction、character 模块）
+- 需要后端配合的接口（12 个）
+  - `GET /api/v1/modes/current` — 读取当前情景模式
+  - `PUT /api/v1/modes/current` — 更新情景模式
+  - `POST /api/v1/vision/analyze` — 图片分析（multipart/form-data）
+  - `GET /api/v1/diaries` — 日记列表（支持 limit/offset/mood 参数）
+  - `GET /api/v1/diaries/{date}` — 单日日记详情
+  - `POST /api/v1/diaries/generate` — 生成日记
+  - `GET /api/v1/characters/profiles` — 角色列表
+  - `POST /api/v1/characters/profiles` — 创建角色
+  - `PATCH /api/v1/characters/profiles/{id}` — 更新角色
+  - `DELETE /api/v1/characters/profiles/{id}` — 删除角色
+  - `PUT /api/v1/characters/conversation` — 更新会话角色
+  - `POST /api/v1/interactions/live2d` — 记录 Live2D 交互事件（可选）
+- 风险点
+  - 所有 12 个后端接口均由前端按预期路径封装但未联调，后端需实现对应 handler
+  - Live2D hit test 使用坐标近似（非 SDK hit test），极端长宽比模型可能不准
+  - 群聊角色 `activeCharacters` 当前在 App.tsx 中传空数组占位，需后续真正接入 CharacterPanel 管理状态
+  - SSL 证书问题导致无法 git push（本地环境），代码在 `codex/mvp` 本地分支
+- 下一步建议
+  - 后端优先实现 12 个接口并前后端联调
+  - 联调完毕后用真实数据测试各功能完整流程（ModeSwitch 切换、图片分析、日记生成、Live2D 交互记录）
+  - 群聊角色的 App.tsx 状态管理（activeCharacters）在联调时完成接入
+  - 可以进入 F20 或后端联调阶段
