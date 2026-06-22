@@ -8,6 +8,7 @@ from app.api.v1.routes import (
     live2d,
     memories,
     messages,
+    reminders,
     sync,
     skill_market,
     skills,
@@ -26,6 +27,7 @@ api_router.include_router(conversations.router)
 api_router.include_router(messages.router)
 api_router.include_router(memories.router)
 api_router.include_router(todos.router)
+api_router.include_router(reminders.router)
 api_router.include_router(sync.router)
 api_router.include_router(characters.router)
 api_router.include_router(live2d.router)

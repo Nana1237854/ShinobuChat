@@ -95,6 +95,11 @@ class Settings(BaseSettings):
     whisper_model: str = Field(default="whisper-1")
     whisper_language: str = Field(default="")
 
+    reminder_enabled: bool = Field(default=True)
+    reminder_background_enabled: bool = Field(default=False)
+    reminder_scan_interval_seconds: int = Field(default=60)
+    reminder_due_soon_minutes: int = Field(default=15)
+
     model_config = SettingsConfigDict(env_file=".env", env_prefix="SC_", extra="ignore")
 
     @property

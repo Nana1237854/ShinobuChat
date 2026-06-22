@@ -29,6 +29,7 @@ from app.services.skill_manager import SkillManager
 from app.services.skill_service import SkillRegistry
 from app.services.stream_events import SseEncoder
 from app.services.sync_service import SyncService
+from app.services.reminder_scheduler_service import ReminderSchedulerService
 from app.services.todo_service import TodoService
 from app.services.tool_registry import ToolRegistry
 from app.services.asr_service import ASRConfig
@@ -176,6 +177,10 @@ def get_sync_service(db: Session = Depends(get_db)) -> SyncService:
 
 def get_todo_service(db: Session = Depends(get_db)) -> TodoService:
     return TodoService(db, SyncService(db))
+
+
+def get_reminder_service(db: Session = Depends(get_db)) -> ReminderSchedulerService:
+    return ReminderSchedulerService(db)
 
 
 def get_conversation_service(db: Session = Depends(get_db)) -> ConversationService:

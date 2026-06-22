@@ -37,6 +37,34 @@ def create_app() -> FastAPI:
         ConfigService.validate_encryption_key()
         init_db()
 
+        if settings.reminder_background_enabled:
+            import asyncio
+
+            from app.db.session import SessionLocal
+            from app.services.reminder_scheduler_service import ReminderSchedulerService
+
+            async def reminder_loop() -> None:
+                while True:
+                    try:
+                        await asyncio.sleep(settings.reminder_scan_interval_seconds)
+                        db = SessionLocal()
+                        try:
+                            service = ReminderSchedulerService(db)
+                            events = service.scan_due_reminders()
+                            if events:
+                                logger.info(
+                                    "Reminder scan produced %d events", len(events)
+                                )
+                        finally:
+                            db.close()
+                    except Exception:
+                        logger.exception("Reminder background scan failed")
+
+            import logging
+
+            logger = logging.getLogger("shinobu.reminder")
+            asyncio.create_task(reminder_loop())
+
     @app.get("/health", tags=["health"])
     async def health_check() -> dict[str, str]:
         return {"status": "ok"}
