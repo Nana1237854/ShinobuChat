@@ -130,6 +130,12 @@ body,
   margin: 0;
 }
 
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
 .skip-link {
   position: absolute;
   top: -100%;
@@ -1774,7 +1780,7 @@ button:disabled {
   border-radius: 4px;
   color: var(--color-text-subtle);
   background: #f8f9fc;
-  font-size: 0.58rem;
+  font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
