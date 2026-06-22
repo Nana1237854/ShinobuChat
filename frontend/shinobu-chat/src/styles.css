@@ -19,6 +19,23 @@ body,
   margin: 0;
 }
 
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 16px;
+  z-index: 999;
+  padding: 10px 16px;
+  border-radius: 7px;
+  color: #fff;
+  background: #2f67df;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  top: 16px;
+}
+
 button,
 input,
 select,
