@@ -248,7 +248,12 @@ def get_mode_service(db: Session = Depends(get_db)) -> ModeService:
 
 
 def get_diary_service(db: Session = Depends(get_db)) -> DiaryService:
-    return DiaryService(db)
+    return DiaryService(
+        db,
+        ai_client=get_ai_client(),
+        config_service=ConfigService(db),
+        emotion_service=get_user_emotion_service(),
+    )
 
 
 def get_live2d_interaction_service(db: Session = Depends(get_db)) -> Live2DInteractionService:

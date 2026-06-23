@@ -69,6 +69,7 @@ class Settings(BaseSettings):
 
     agent_max_steps: int = Field(default=50)
 
+    diary_enabled: bool = Field(default=True)
     memory_enabled: bool = Field(default=True)
     memory_pgvector_enabled: bool = Field(default=False)
     memory_max_results: int = Field(default=3)

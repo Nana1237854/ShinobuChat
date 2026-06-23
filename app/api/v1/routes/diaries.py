@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.deps import get_current_user_id, get_diary_service
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import BadRequestError, NotFoundError
 from app.schemas.diary import DiaryDetail, DiaryGenerateRequest, DiaryGenerateResponse, DiaryOut
 from app.services.diary_service import DiaryService
 
@@ -34,10 +34,13 @@ def get_diary_by_date(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
-@router.post("/generate", response_model=DiaryGenerateResponse, status_code=501)
+@router.post("/generate", response_model=DiaryGenerateResponse)
 def generate_diary(
     payload: DiaryGenerateRequest | None = None,
     user_id: UUID = Depends(get_current_user_id),
     diary_service: DiaryService = Depends(get_diary_service),
 ) -> DiaryGenerateResponse:
-    raise HTTPException(status_code=501, detail="Diary generation not yet implemented")
+    try:
+        return diary_service.generate(user_id, payload)
+    except BadRequestError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

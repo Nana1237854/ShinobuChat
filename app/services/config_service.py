@@ -40,6 +40,7 @@ CONFIG_SPECS: dict[str, ConfigSpec] = {
     "edge_tts_voice": ConfigSpec(str),
     "asr_engine": ConfigSpec(str),
     "whisper_api_key": ConfigSpec(str, True),
+    "diary_enabled": ConfigSpec(bool),
 }
 
 

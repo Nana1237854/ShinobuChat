@@ -34,6 +34,7 @@ class DiaryDetail(DiaryOut):
 class DiaryGenerateRequest(BaseModel):
     date: str | None = None
     style: str | None = None
+    force: bool = False
 
 
 class DiaryGenerateResponse(BaseModel):
