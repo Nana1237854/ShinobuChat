@@ -54,6 +54,25 @@ def ensure_character_profiles_columns() -> None:
             connection.execute(text(statement))
 
 
+def ensure_trusted_download_sources_columns() -> None:
+    """Add F15 columns to existing trusted_download_sources tables (idempotent)."""
+    if engine.dialect.name != "postgresql":
+        return
+
+    statements = [
+        "ALTER TABLE trusted_download_sources ADD COLUMN IF NOT EXISTS product_key VARCHAR(128)",
+        "ALTER TABLE trusted_download_sources ADD COLUMN IF NOT EXISTS trust_level VARCHAR(32) NOT NULL DEFAULT 'trusted'",
+        "ALTER TABLE trusted_download_sources ADD COLUMN IF NOT EXISTS source_type VARCHAR(32) NOT NULL DEFAULT 'builtin'",
+        "ALTER TABLE trusted_download_sources ADD COLUMN IF NOT EXISTS note TEXT",
+        "ALTER TABLE trusted_download_sources ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
+        "ALTER TABLE trusted_download_sources ALTER COLUMN user_id DROP NOT NULL",
+    ]
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
 def ensure_memory_columns() -> None:
     """Add missing columns to existing conversation_memories tables (idempotent)."""
     if engine.dialect.name != "postgresql":
@@ -91,6 +110,7 @@ def init_db() -> None:
     ensure_memory_columns()
     ensure_live2d_interactions_columns()
     ensure_character_profiles_columns()
+    ensure_trusted_download_sources_columns()
 
 
 if __name__ == "__main__":

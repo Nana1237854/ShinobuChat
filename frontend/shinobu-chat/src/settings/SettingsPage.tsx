@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState, type MouseEvent } from 'react';
-import { BookOpen, Bot, Clock3, Cpu, MonitorPlay, Palette, Puzzle, Settings2, SunMoon, Users, X } from 'lucide-react';
+import { BookOpen, Bot, Clock3, Cpu, Globe, MonitorPlay, Palette, Puzzle, ScrollText, Settings2, Shield, SunMoon, Users, Wrench, X } from 'lucide-react';
 import { CharacterEditor } from '../chat/CharacterEditor';
 import { PetSettingsPanel } from '../desktop-pet/PetSettingsPanel';
 import { GoalTrackerPanel } from '../goals/GoalTrackerPanel';
@@ -11,10 +11,14 @@ import { ConfigPanel } from './ConfigPanel';
 import { PersonaSettingsPanel } from './PersonaSettingsPanel';
 import { SkillPanel } from './SkillPanel';
 import { LocalAppsPanel } from '../components/settings/LocalAppsPanel';
+import BrowserReaderPanel from '../components/settings/BrowserReaderPanel';
+import LocalAgentPermissionPanel from '../components/settings/LocalAgentPermissionPanel';
+import ActionLogsPanel from '../components/settings/ActionLogsPanel';
+import McpSettingsPanel from '../components/settings/McpSettingsPanel';
 import { ModeSwitch } from '../modes/ModeSwitch';
 import type { ConversationMode } from '../types';
 
-export type SettingsTab = 'appearance' | 'persona' | 'models' | 'skills' | 'localApps' | 'memories' | 'goals' | 'mode' | 'diaries' | 'characters';
+export type SettingsTab = 'appearance' | 'persona' | 'models' | 'skills' | 'localApps' | 'memories' | 'goals' | 'mode' | 'diaries' | 'characters' | 'browser' | 'permissions' | 'actionLogs' | 'mcp';
 
 type SettingsPageProps = {
   accessToken: string;
@@ -51,6 +55,10 @@ const tabs: TabDefinition[] = [
   { id: 'mode', label: '情景模式', note: '切换陪伴 / 工作 / 专注 / 夜间', icon: SunMoon },
   { id: 'diaries', label: 'Shinobu 日记', note: '每日回顾与心情记录', icon: BookOpen },
   { id: 'characters', label: '辅助角色', note: '管理会话角色', icon: Users },
+  { id: 'browser', label: '浏览器能力', note: '搜索、读取与网页总结', icon: Globe },
+  { id: 'permissions', label: '权限中心', note: 'Agent 能力开关与安全', icon: Shield },
+  { id: 'actionLogs', label: '执行日志', note: '本地与浏览器动作记录', icon: ScrollText },
+  { id: 'mcp', label: 'MCP 集成', note: '外部 Agent 适配层', icon: Wrench },
 ];
 
 export function SettingsPage({
@@ -218,6 +226,30 @@ export function SettingsPage({
                 conversationMode={conversationMode}
                 onCharactersChange={onCharactersChange || (() => {})}
               />
+            </div>
+          ) : null}
+
+          {activeTab === 'browser' ? (
+            <div className="settings-legacy-panel">
+              <BrowserReaderPanel accessToken={accessToken} />
+            </div>
+          ) : null}
+
+          {activeTab === 'permissions' ? (
+            <div className="settings-legacy-panel">
+              <LocalAgentPermissionPanel accessToken={accessToken} />
+            </div>
+          ) : null}
+
+          {activeTab === 'actionLogs' ? (
+            <div className="settings-legacy-panel">
+              <ActionLogsPanel accessToken={accessToken} />
+            </div>
+          ) : null}
+
+          {activeTab === 'mcp' ? (
+            <div className="settings-legacy-panel">
+              <McpSettingsPanel accessToken={accessToken} />
             </div>
           ) : null}
         </main>

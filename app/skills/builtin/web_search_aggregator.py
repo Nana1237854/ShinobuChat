@@ -1,11 +1,8 @@
-import json
-import urllib.parse
-import urllib.request
-
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.skills.base import CancelToken, OnProgress, Skill, SkillError, SkillProgress
+from app.services.web_search_service import WebSearchService
 
 
 class WebSearchParams(BaseModel):
@@ -33,33 +30,22 @@ class WebSearchAggregatorSkill(Skill):
         except Exception as exc:
             raise SkillError("INVALID_PARAMS", str(exc), "搜索参数不太对。") from exc
 
-        if not settings.google_search_api_key or not settings.google_search_cx:
-            raise SkillError("API_KEY_MISSING", "Google Search API not configured", "搜索功能还没配置好，需要先设置 Google Search API Key。")
-
         await on_progress(SkillProgress(skill_name=self.name, message=f"搜索: {parsed.query}...", percent=0.4))
         if cancel_token.is_set():
             raise SkillError("CANCELLED", "Skill cancelled", "搜索已取消。")
 
-        query_params = urllib.parse.urlencode(
-            {
-                "key": settings.google_search_api_key,
-                "cx": settings.google_search_cx,
-                "q": parsed.query,
-                "num": parsed.num,
-            }
+        svc = WebSearchService(
+            api_key=settings.google_search_api_key,
+            cx=settings.google_search_cx,
         )
-        request = urllib.request.Request(
-            f"https://www.googleapis.com/customsearch/v1?{query_params}",
-            headers={"User-Agent": "ShinobuChat/1.0"},
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=10) as response:
-                data = json.loads(response.read().decode("utf-8"))
-        except Exception as exc:
-            raise SkillError("NETWORK_ERROR", str(exc), "网络好像不太稳定，稍后再搜？") from exc
+        result = svc.search(parsed.query, max_results=parsed.num)
+
+        if result["status"] != "ok":
+            raise SkillError("SEARCH_FAILED", result.get("message", ""), "搜索功能还没配置好，需要先设置 Google Search API Key。")
 
         await on_progress(SkillProgress(skill_name=self.name, message="整理搜索结果...", percent=0.85))
-        items = data.get("items", [])
+
+        items = result["results"]
         if not items:
             return f"没有找到关于「{parsed.query}」的结果。"
 
@@ -67,6 +53,6 @@ class WebSearchAggregatorSkill(Skill):
         for index, item in enumerate(items, 1):
             title = item.get("title", "无标题")
             snippet = item.get("snippet", "无摘要")
-            link = item.get("link", "")
+            link = item.get("url", "")
             lines.append(f"\n## {index}. {title}\n{snippet}\n{link}")
         return "\n".join(lines)

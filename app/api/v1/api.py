@@ -11,7 +11,9 @@ from app.api.v1.routes import (
     goals,
     interactions,
     live2d,
+    local_agent,
     local_apps,
+    mcp,
     memories,
     messages,
     modes,
@@ -21,6 +23,7 @@ from app.api.v1.routes import (
     sync,
     skill_market,
     skills,
+    tasks,
     todos,
     users,
     vision,
@@ -52,3 +55,6 @@ api_router.include_router(interactions.router)
 api_router.include_router(local_apps.router)
 api_router.include_router(pending_actions.router)
 api_router.include_router(browser.router)
+api_router.include_router(local_agent.router)
+api_router.include_router(tasks.router)
+api_router.include_router(mcp.router)
