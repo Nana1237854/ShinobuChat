@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Uuid
+from sqlalchemy import DateTime, Float, ForeignKey, JSON, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.time import local_now
@@ -18,4 +18,6 @@ class Live2DInteraction(Base):
     hit_area: Mapped[str] = mapped_column(String(20), nullable=False)
     x: Mapped[float] = mapped_column(Float, nullable=False)
     y: Mapped[float] = mapped_column(Float, nullable=False)
+    interaction_type: Mapped[str] = mapped_column(String(20), default="click", nullable=False)
+    interaction_metadata: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=local_now, nullable=False)

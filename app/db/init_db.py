@@ -24,6 +24,21 @@ def ensure_todos_columns() -> None:
             connection.execute(text(statement))
 
 
+def ensure_live2d_interactions_columns() -> None:
+    """Add B15 columns to existing live2d_interactions tables (idempotent)."""
+    if engine.dialect.name != "postgresql":
+        return
+
+    statements = [
+        "ALTER TABLE live2d_interactions ADD COLUMN IF NOT EXISTS interaction_type VARCHAR(20) NOT NULL DEFAULT 'click'",
+        "ALTER TABLE live2d_interactions ADD COLUMN IF NOT EXISTS metadata JSON",
+    ]
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
 def ensure_memory_columns() -> None:
     """Add missing columns to existing conversation_memories tables (idempotent)."""
     if engine.dialect.name != "postgresql":
@@ -58,6 +73,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     ensure_todos_columns()
     ensure_memory_columns()
+    ensure_live2d_interactions_columns()
 
 
 if __name__ == "__main__":
