@@ -16,7 +16,15 @@ class ConflictError(AppError):
     pass
 
 
+class ForbiddenError(AppError):
+    pass
+
+
 class NotFoundError(AppError):
+    pass
+
+
+class PayloadTooLargeError(AppError):
     pass
 
 

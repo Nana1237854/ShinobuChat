@@ -2,7 +2,7 @@ import io
 import logging
 
 from app.core.config import settings
-from app.core.exceptions import BadRequestError
+from app.core.exceptions import BadRequestError, PayloadTooLargeError
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def validate_image_bytes(
         raise BadRequestError("Image file is empty")
 
     if len(data) > max_bytes:
-        raise BadRequestError(
+        raise PayloadTooLargeError(
             f"Image too large: {len(data)} bytes exceeds {max_bytes} bytes limit"
         )
 
@@ -98,7 +98,7 @@ def validate_image_bytes(
     output = buf.getvalue()
 
     if len(output) > max_output_bytes:
-        raise BadRequestError(
+        raise PayloadTooLargeError(
             f"Re-encoded image too large: {len(output)} bytes exceeds "
             f"{max_output_bytes} bytes output limit"
         )

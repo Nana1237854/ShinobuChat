@@ -6,7 +6,9 @@ from app.core.exceptions import (
     BadRequestError,
     ConfigurationError,
     ConflictError,
+    ForbiddenError,
     NotFoundError,
+    PayloadTooLargeError,
     UnauthorizedError,
     UpstreamServiceError,
 )
@@ -15,7 +17,9 @@ _STATUS_BY_ERROR_TYPE = {
     BadRequestError: status.HTTP_400_BAD_REQUEST,
     ConfigurationError: status.HTTP_503_SERVICE_UNAVAILABLE,
     ConflictError: status.HTTP_409_CONFLICT,
+    ForbiddenError: status.HTTP_403_FORBIDDEN,
     NotFoundError: status.HTTP_404_NOT_FOUND,
+    PayloadTooLargeError: status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
     UnauthorizedError: status.HTTP_401_UNAUTHORIZED,
     UpstreamServiceError: status.HTTP_502_BAD_GATEWAY,
 }

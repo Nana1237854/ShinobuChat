@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from PIL import Image
 
-from app.core.exceptions import BadRequestError, ConfigurationError, UpstreamServiceError
+from app.core.exceptions import BadRequestError, ConfigurationError, PayloadTooLargeError, UpstreamServiceError
 from app.core.image_validation import validate_image_bytes
 from app.services.vision_client import (
     OCRVisionClient,
@@ -38,7 +38,7 @@ class ImageValidationTests(unittest.TestCase):
 
     def test_oversized_bytes_raises(self):
         data = _make_jpeg_bytes(10, 10)
-        with self.assertRaises(BadRequestError) as ctx:
+        with self.assertRaises(PayloadTooLargeError) as ctx:
             validate_image_bytes(data, max_bytes=len(data) - 1, max_side=100, max_pixels=10000)
         self.assertIn("too large", str(ctx.exception.detail))
 
@@ -64,7 +64,7 @@ class ImageValidationTests(unittest.TestCase):
     def test_output_too_large_raises(self):
         # Create a JPEG that will re-encode larger than the output limit
         data = _make_jpeg_bytes(100, 100)
-        with self.assertRaises(BadRequestError) as ctx:
+        with self.assertRaises(PayloadTooLargeError) as ctx:
             validate_image_bytes(data, max_bytes=1024 * 1024, max_side=200,
                                  max_pixels=50000, max_output_bytes=10)
         self.assertIn("output", str(ctx.exception.detail).lower())

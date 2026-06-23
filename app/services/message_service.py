@@ -1,6 +1,9 @@
 import asyncio
+import logging
 from dataclasses import dataclass
 from types import SimpleNamespace
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy.orm import Session
 
@@ -123,7 +126,7 @@ class MessageService:
         if remaining.strip():
             raw_sentences.append(remaining.strip())
 
-        print(f"[MSG] reply ({len(full_reply)} chars) emotion={assistant_emotion}")
+        logger.debug("reply len=%d emotion=%s", len(full_reply), assistant_emotion)
         sentences: list[str] = []
         for sentence in raw_sentences:
             if len(sentence) > 40:
@@ -132,7 +135,7 @@ class MessageService:
                 sentences.append(sentence)
         sentences = [sentence for sentence in sentences if len(sentence) >= 6]
         if sentences:
-            print(f"[MSG] {len(sentences)} sentences: {sentences[0][:60]}...")
+            logger.debug("sentences count=%d first_len=%d", len(sentences), len(sentences[0]) if sentences else 0)
 
         if self.voice_service is not None and sentences:
             processor = StreamProcessor(
