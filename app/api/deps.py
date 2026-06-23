@@ -24,6 +24,7 @@ from app.services.embedding_service import EmbeddingService
 from app.services.http_client import UrllibHttpClient
 from app.services.character_profile_service import CharacterProfileService
 from app.services.diary_service import DiaryService
+from app.services.image_understanding_service import ImageUnderstandingService
 from app.services.live2d_interaction_service import Live2DInteractionService
 from app.services.live2d_service import Live2DService
 from app.services.mode_service import ModeService
@@ -233,6 +234,13 @@ def get_message_service(db: Session = Depends(get_db)) -> MessageService:
         ConfigService(db),
         SkillManager(db),
     )
+
+
+@lru_cache
+def get_image_understanding_service() -> ImageUnderstandingService:
+    from app.services.vision_client import ConfigurableVisionClient
+
+    return ImageUnderstandingService(ConfigurableVisionClient(get_http_client()))
 
 
 def get_mode_service(db: Session = Depends(get_db)) -> ModeService:

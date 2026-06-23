@@ -19,3 +19,5 @@ class VisionAnalyzeResponse(BaseModel):
     text_in_image: str | None = None
     confidence: VisionConfidence
     created_at: datetime
+    provider: str
+    fallback_used: bool
