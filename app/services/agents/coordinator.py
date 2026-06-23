@@ -48,6 +48,7 @@ class AgentCoordinator:
         content: str,
         history: list[Message],
         user_skills: list[Skill] | None = None,
+        conversation_id: uuid.UUID | None = None,
     ) -> AgentPlan:
         decision = self.resolve_route(requested_route_mode, content, history)
         memory_context = self.memory_agent.search(user_id, content)
@@ -56,6 +57,13 @@ class AgentCoordinator:
         conversation_mode, mode_context = self._conversation_mode_context(user_id)
         if mode_context:
             memory_context = [mode_context, *memory_context]
+
+        # Group character context — inject after mode, before persona
+        _char_names, character_context = self._conversation_characters_context(
+            user_id, conversation_id
+        )
+        if character_context:
+            memory_context = [character_context, *memory_context]
 
         # Persona tone instructions — injected as dynamic context, NOT base_system
         persona_context = self._persona_tone_context(user_id)
@@ -225,3 +233,66 @@ class AgentCoordinator:
         ):
             return RouterDecision(RouteMode.AGENT, 0.93, "continue agent follow-up after assistant clarification")
         return None
+
+    @staticmethod
+    def _conversation_characters_context(
+        user_id: uuid.UUID,
+        conversation_id: uuid.UUID | None,
+    ) -> tuple[list[str], str]:
+        """Build character context for a conversation.
+
+        Returns (character_names_list, context_string). The context string
+        includes guard phrases that enforce character role boundaries:
+        - Shinobu is always primary and replies first
+        - Auxiliary characters provide at most one short sentence each
+        - Auxiliary characters must not continue each other's dialogue
+        - Auxiliary character content must not be written to long-term memory
+
+        Falls back gracefully if no conversation_id or no characters exist.
+        """
+        try:
+            from app.db.session import SessionLocal
+            from app.services.character_profile_service import CharacterProfileService
+
+            db = SessionLocal()
+            try:
+                svc = CharacterProfileService(db)
+                shinobu = svc.get_default_shinobu_profile()
+                names = [shinobu["name"]]
+
+                if conversation_id:
+                    try:
+                        chars = svc.get_conversation_characters(conversation_id, user_id)
+                        for c in chars:
+                            if c.name != shinobu["name"]:
+                                names.append(c.name)
+                    except Exception:
+                        pass  # No conversation characters found — use Shinobu only
+
+                context_lines = [
+                    f"{shinobu['name']} 是主要角色(primary)，始终优先回复。",
+                    "辅助角色只能提供简短补充，每个最多一句话。",
+                    "辅助角色之间不得互相继续对话。",
+                    "辅助角色内容不得写入长期记忆。",
+                ]
+                if len(names) > 1:
+                    context_lines.append(f"当前辅助角色: {', '.join(names[1:])}")
+
+                return names, "\n".join(context_lines)
+            finally:
+                db.close()
+        except Exception as exc:
+            import logging
+            _logger_cc = logging.getLogger("shinobu.coordinator")
+            _logger_cc.warning(
+                "Falling back to Shinobu-only character context for user_id=%s, conv_id=%s: %s",
+                user_id,
+                conversation_id,
+                exc,
+            )
+            return ["Shinobu"], (
+                "Shinobu 是主要角色(primary)，始终优先回复。\n"
+                "辅助角色只能提供简短补充，每个最多一句话。\n"
+                "辅助角色之间不得互相继续对话。\n"
+                "辅助角色内容不得写入长期记忆。"
+            )

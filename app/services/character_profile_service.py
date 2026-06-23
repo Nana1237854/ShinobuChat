@@ -36,6 +36,7 @@ class CharacterProfileService:
             persona=payload.persona,
             avatar_url=payload.avatar_url,
             color=payload.color,
+            role_type=payload.role_type,
         )
         self.db.add(profile)
         self.db.commit()
@@ -87,6 +88,54 @@ class CharacterProfileService:
             raise NotFoundError("Character profile not found")
         self.db.delete(row)
         self.db.commit()
+
+    @staticmethod
+    def get_default_shinobu_profile() -> dict:
+        """Return a hardcoded Shinobu profile. This is the primary AI companion.
+
+        Does NOT write to the database — it is a pure in-memory definition
+        used for context injection when no user-defined primary character exists.
+        """
+        return {
+            "name": "Shinobu",
+            "persona": "你的主要AI陪伴角色",
+            "role_type": "primary",
+        }
+
+    @staticmethod
+    def validate_auxiliary_character(profile) -> bool:
+        """Validate that an auxiliary character does not override Shinobu's core persona.
+
+        Checks that the character's persona does not contain language that would
+        assert primary-role authority or contradict Shinobu's core identity.
+
+        Returns True if the auxiliary character is valid, False otherwise.
+        """
+        if getattr(profile, "role_type", None) != "auxiliary":
+            return True  # Only validate auxiliary characters
+
+        persona = getattr(profile, "persona", "") or ""
+        # Disallow phrases that assert primary-role authority
+        forbidden_substrings = [
+            "主要角色",
+            "唯一回复",
+            "代替Shinobu",
+            "取代Shinobu",
+            "你是Shinobu",
+            "我是Shinobu",
+            "primary role",
+            "only responder",
+        ]
+        persona_lower = persona.lower()
+        for phrase in forbidden_substrings:
+            if phrase.lower() in persona_lower:
+                logger.warning(
+                    "Auxiliary character '%s' contains forbidden persona phrase: %s",
+                    getattr(profile, "name", "unknown"),
+                    phrase,
+                )
+                return False
+        return True
 
     # ── Conversation-level character management ──
 

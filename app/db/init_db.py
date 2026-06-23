@@ -39,6 +39,20 @@ def ensure_live2d_interactions_columns() -> None:
             connection.execute(text(statement))
 
 
+def ensure_character_profiles_columns() -> None:
+    """Add B16 role_type column to existing character_profiles tables (idempotent)."""
+    if engine.dialect.name != "postgresql":
+        return
+
+    statements = [
+        "ALTER TABLE character_profiles ADD COLUMN IF NOT EXISTS role_type VARCHAR(20) NOT NULL DEFAULT 'auxiliary'",
+    ]
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
 def ensure_memory_columns() -> None:
     """Add missing columns to existing conversation_memories tables (idempotent)."""
     if engine.dialect.name != "postgresql":
@@ -74,6 +88,7 @@ def init_db() -> None:
     ensure_todos_columns()
     ensure_memory_columns()
     ensure_live2d_interactions_columns()
+    ensure_character_profiles_columns()
 
 
 if __name__ == "__main__":

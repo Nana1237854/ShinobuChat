@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -9,6 +10,7 @@ class CharacterProfileCreate(BaseModel):
     persona: str = Field(min_length=1)
     avatar_url: str | None = None
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    role_type: Literal["primary", "auxiliary"] = "auxiliary"
 
 
 class CharacterProfileUpdate(BaseModel):
@@ -16,6 +18,7 @@ class CharacterProfileUpdate(BaseModel):
     persona: str | None = Field(default=None, min_length=1)
     avatar_url: str | None = None
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    role_type: Literal["primary", "auxiliary"] | None = None
 
 
 class CharacterProfileOut(BaseModel):
@@ -26,6 +29,7 @@ class CharacterProfileOut(BaseModel):
     persona: str
     avatar_url: str | None = None
     color: str | None = None
+    role_type: str = "auxiliary"
     created_at: datetime
 
 

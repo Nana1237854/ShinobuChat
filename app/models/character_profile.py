@@ -20,6 +20,9 @@ class CharacterProfile(Base):
     persona: Mapped[str] = mapped_column(Text, nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    role_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="auxiliary"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=local_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=local_now, onupdate=local_now, nullable=False
