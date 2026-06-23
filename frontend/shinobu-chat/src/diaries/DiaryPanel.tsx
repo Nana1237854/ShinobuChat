@@ -217,6 +217,26 @@ export function DiaryPanel({ accessToken }: { accessToken: string }) {
     }
   }, [accessToken, today, loadDiaries]);
 
+  const handleForceRegenerate = useCallback(async () => {
+    if (!selectedDate) return;
+    setGenerating(true);
+    setError(null);
+    try {
+      await generateDiary(accessToken, { date: selectedDate, force: true });
+      await loadDiaries();
+      const result = await getDiaryByDate(accessToken, selectedDate);
+      setDetail(result);
+    } catch (e) {
+      if (e instanceof ApiRequestError && e.status === 501) {
+        setError('日记生成功能即将支持，敬请期待。');
+      } else {
+        setError(e instanceof Error ? e.message : '重新生成失败');
+      }
+    } finally {
+      setGenerating(false);
+    }
+  }, [accessToken, selectedDate, loadDiaries]);
+
   const closeDetail = useCallback(() => {
     setSelectedDate(null);
     setDetail(null);
@@ -238,10 +258,9 @@ export function DiaryPanel({ accessToken }: { accessToken: string }) {
           className="settings-primary-button diary-generate-btn"
           onClick={handleGenerate}
           disabled={generating}
-          title="日记生成功能即将支持"
         >
           <Sparkles size={16} />
-          {generating ? '正在生成...' : '即将支持'}
+          {generating ? '正在生成...' : '生成今日日记'}
         </button>
       </header>
 
@@ -266,7 +285,16 @@ export function DiaryPanel({ accessToken }: { accessToken: string }) {
         <div className="diary-empty">
           <BookOpen size={40} />
           <h3>还没有日记</h3>
-          <p>日记生成功能即将支持，敬请期待。</p>
+          <p>让 Shinobu 为你生成今日回顾吧。</p>
+          <button
+            type="button"
+            className="settings-primary-button"
+            onClick={handleGenerate}
+            disabled={generating}
+          >
+            <Sparkles size={16} />
+            {generating ? '正在生成...' : '生成今日日记'}
+          </button>
         </div>
       ) : null}
 
@@ -379,6 +407,16 @@ export function DiaryPanel({ accessToken }: { accessToken: string }) {
                 ))}
               </div>
               <p className="diary-detail-note">这是 Shinobu 视角的当日回顾。</p>
+              <button
+                type="button"
+                className="settings-secondary-button"
+                onClick={handleForceRegenerate}
+                disabled={generating}
+                style={{ marginTop: 12 }}
+              >
+                <RefreshCw size={14} />
+                {generating ? '重新生成中...' : '重新生成'}
+              </button>
             </>
           ) : null}
         </div>

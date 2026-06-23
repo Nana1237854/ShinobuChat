@@ -104,6 +104,8 @@ export async function sendMessageStream(payload: {
   conversationId?: string | null;
   content: string;
   routeMode: RouteMode;
+  accessToken: string;
+  visionContext?: string | null;
   onEvent: (event: StreamEvent) => void;
 }) {
   const response = await fetch(`${API_BASE}/messages`, {
@@ -111,12 +113,14 @@ export async function sendMessageStream(payload: {
     headers: {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
+      Authorization: `Bearer ${payload.accessToken}`,
     },
     body: JSON.stringify({
       user_id: payload.userId,
       conversation_id: payload.conversationId || null,
       content: payload.content,
       route_mode: payload.routeMode,
+      vision_context: payload.visionContext || null,
     }),
   });
 

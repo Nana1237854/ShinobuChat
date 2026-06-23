@@ -605,6 +605,7 @@ export default function App() {
         conversationId,
         content,
         routeMode,
+        accessToken: session.accessToken,
         onEvent: event => {
           if (event.type === 'conversation') {
             streamConversationId = event.conversationId;

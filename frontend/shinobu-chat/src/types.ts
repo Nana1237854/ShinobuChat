@@ -329,6 +329,23 @@ export type ModeUpdateRequest = {
   mode: ConversationMode;
 };
 
+// Full response from GET/PUT /modes/conversation (B12)
+export type ConversationModeResponse = {
+  mode: ConversationMode;
+  mode_label: string;
+  description: string;
+  behavior: {
+    mode: ConversationMode;
+    mode_label: string;
+    description: string;
+    tool_policy: { allowed_tool_groups: string[]; blocked_tool_groups: string[] };
+    reply_policy: { max_sentences: number; style: string; prioritize_conciseness: boolean };
+    reminder_policy: { enabled: boolean; reduce_frequency: boolean; urgent_only: boolean; tone: string };
+    decision_tendency: { chat_weight: number; agent_weight: number; prefer_todo_create: boolean; prefer_task_planning: boolean; suppress_idle_chat: boolean };
+  };
+  updated_at: string;
+};
+
 // ── Vision / multimodal ──
 
 export type VisionConfidence = {
@@ -348,6 +365,8 @@ export type VisionAnalyzeResponse = {
   text_in_image?: string | null;
   confidence: VisionConfidence;
   created_at: string;
+  provider: string;
+  fallback_used: boolean;
 };
 
 export type UploadedImagePreview = {
@@ -378,6 +397,7 @@ export type DiaryDetail = DiaryItem & {
 export type DiaryGenerateRequest = {
   date?: string | null;
   style?: string | null;
+  force?: boolean;
 };
 
 export type DiaryGenerateResponse = {
@@ -399,10 +419,13 @@ export type Live2DInteractionEvent = {
   x: number;
   y: number;
   timestamp: string;
+  interaction_type?: string;
+  metadata?: Record<string, unknown> | null;
 };
 
 export type Live2DInteractionFeedback = {
   event_id: string;
+  interaction_type?: string;
   animation?: string | null;
   expression?: string | null;
   message?: string | null;
@@ -418,6 +441,7 @@ export type CharacterProfile = {
   persona: string;
   avatar_url?: string | null;
   color?: string | null;
+  role_type?: string | null;
   created_at: string;
 };
 
