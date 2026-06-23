@@ -5,7 +5,7 @@ export interface McpStatus {
   available: boolean;
   safe_tools: string[];
   blocked_tools: string[];
-  default_user_id: string;
+  default_user_configured: boolean;
   message: string;
 }
 

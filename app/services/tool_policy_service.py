@@ -18,13 +18,16 @@ _ALWAYS_DENIED: set[str] = {
 # open_local_app MUST be listed here to avoid falling into the "unknown" group.
 _EXPLICIT_TOOL_GROUPS: dict[str, str] = {
     "open_local_app": "local_app",
+    "open_url": "browser_open",
+    "read_webpage": "web_search",
+    "search_web": "web_search",
 }
 
 # Per-mode allowed tool groups (snake_case tool names map to groups).
 # Groups not listed for a mode are denied.
 _MODE_TOOL_GROUPS: dict[str, set[str]] = {
-    "companion": {"chat", "memory", "reminder", "emotion", "todo", "config_update", "local_app", "unknown"},
-    "work": {"chat", "memory", "reminder", "todo", "goal", "web_search", "config_update", "local_app", "unknown"},
+    "companion": {"chat", "memory", "reminder", "emotion", "todo", "config_update", "local_app", "browser_open", "unknown"},
+    "work": {"chat", "memory", "reminder", "todo", "goal", "web_search", "config_update", "local_app", "browser_open", "unknown"},
     "focus": {"todo", "goal", "reminder", "local_app", "unknown"},
     "night": {"chat", "reminder", "local_app", "unknown"},
 }

@@ -55,6 +55,13 @@ class McpToolAdapter:
     # ------------------------------------------------------------------
 
     def list_tools(self) -> list[dict]:
+        """Return tool schemas. Prefers ToolRegistry schemas when available."""
+        if self._registry is not None:
+            safe_set = self._tools.keys()
+            return [
+                s for s in self._registry.schemas()
+                if s.get("function", {}).get("name") in safe_set
+            ]
         return [
             {"name": t["name"], "description": t["description"], "inputSchema": t["inputSchema"]}
             for t in self._tools.values()
@@ -82,7 +89,7 @@ class McpToolAdapter:
             history=[],
             user_skills={},
             metadata={
-                "conversation_mode": "companion",
+                "conversation_mode": "work",
                 "route_mode": "mcp",
             },
             user_id=user_id,

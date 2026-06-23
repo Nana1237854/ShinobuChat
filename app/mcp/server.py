@@ -5,6 +5,13 @@ Run as a standalone process:
 
 Implements a minimal MCP-compatible stdio JSON-RPC server.
 Only exposes tools listed in MCP_SAFE_TOOLS.
+
+When SC_MCP_ENABLED=true, initialises the real ToolRegistry so that
+every tools/call flows through ToolRegistry.execute_verified(), which
+enforces ToolPolicyService + ToolVerifier.
+
+Requires SC_MCP_DEFAULT_USER_ID for tools that need user context
+(e.g. open_local_app, search_web).
 """
 
 from __future__ import annotations
@@ -12,12 +19,15 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from uuid import UUID
 
-from app.mcp.config import MCP_BLOCKED_TOOLS, MCP_ENABLED, MCP_SAFE_TOOLS
+from app.mcp.config import MCP_BLOCKED_TOOLS, MCP_DEFAULT_USER_ID, MCP_ENABLED, MCP_SAFE_TOOLS
 from app.mcp.tool_adapter import create_default_adapter
 
 logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 logger = logging.getLogger("mcp-server")
+
+_USER_CONTEXT_REQUIRED_TOOLS: set[str] = {"open_local_app"}
 
 
 def _send(response: dict) -> None:
@@ -26,7 +36,17 @@ def _send(response: dict) -> None:
     sys.stdout.flush()
 
 
-def handle_request(request: dict, adapter) -> dict | None:
+def _resolve_default_user_id() -> UUID | None:
+    if not MCP_DEFAULT_USER_ID:
+        return None
+    try:
+        return UUID(MCP_DEFAULT_USER_ID)
+    except ValueError:
+        logger.error("Invalid SC_MCP_DEFAULT_USER_ID: %s", MCP_DEFAULT_USER_ID)
+        return None
+
+
+def handle_request(request: dict, adapter, default_user_id: UUID | None = None) -> dict | None:
     method = request.get("method", "")
     req_id = request.get("id")
 
@@ -87,8 +107,21 @@ def handle_request(request: dict, adapter) -> dict | None:
                 },
             }
 
+        # User-context gate: tools that need a real user must have one configured
+        if tool_name in _USER_CONTEXT_REQUIRED_TOOLS and default_user_id is None:
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "content": [{"type": "text", "text": json.dumps(
+                        {"error": "SC_MCP_DEFAULT_USER_ID is required for this tool."}
+                    )}],
+                    "isError": True,
+                },
+            }
+
         arguments = params.get("arguments", {})
-        result_text = adapter.call_tool(tool_name, arguments)
+        result_text = adapter.call_tool(tool_name, arguments, user_id=default_user_id)
         return {
             "jsonrpc": "2.0",
             "id": req_id,
@@ -110,18 +143,30 @@ def handle_request(request: dict, adapter) -> dict | None:
 def run_stdio() -> None:
     """Run the MCP server in stdio mode."""
     if not MCP_ENABLED:
-        logger.warning(
-            "MCP is disabled. Set SC_MCP_ENABLED=true to enable. Exiting."
-        )
+        logger.warning("MCP is disabled. Set SC_MCP_ENABLED=true to enable. Exiting.")
         _send({
             "jsonrpc": "2.0",
             "method": "log",
-            "params": {"level": "warning", "message": "MCP is currently disabled. Set SC_MCP_ENABLED=true."},
+            "params": {
+                "level": "warning",
+                "message": "MCP is currently disabled. Set SC_MCP_ENABLED=true.",
+            },
         })
         return  # Exit cleanly — do not accept any requests
 
-    adapter = create_default_adapter()
-    logger.info("MCP Server ready (stdio mode). Safe tools: %s", sorted(MCP_SAFE_TOOLS))
+    # Initialise real ToolRegistry so tools/call flows through
+    # ToolRegistry.execute_verified() → ToolPolicyService + ToolVerifier
+    from app.api.deps import get_tool_registry
+
+    tool_registry = get_tool_registry()
+    default_user_id = _resolve_default_user_id()
+
+    adapter = create_default_adapter(tool_registry=tool_registry)
+    logger.info(
+        "MCP Server ready (stdio mode). Safe tools: %s, default_user: %s",
+        sorted(MCP_SAFE_TOOLS),
+        str(default_user_id) if default_user_id else "not configured",
+    )
 
     for line in sys.stdin:
         line = line.strip()
@@ -134,7 +179,7 @@ def run_stdio() -> None:
             continue
 
         try:
-            response = handle_request(request, adapter)
+            response = handle_request(request, adapter, default_user_id)
             if response is not None:
                 _send(response)
         except Exception:

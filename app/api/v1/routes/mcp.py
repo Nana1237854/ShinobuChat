@@ -27,7 +27,7 @@ class McpStatusResponse(BaseModel):
     available: bool  # True when MCP server module is importable
     safe_tools: list[str] = Field(default_factory=list)
     blocked_tools: list[str] = Field(default_factory=list)
-    default_user_id: str = ""
+    default_user_configured: bool = False
     message: str = ""
 
 
@@ -54,13 +54,16 @@ def get_mcp_status(
         except (json.JSONDecodeError, TypeError):
             pass
 
+    from app.mcp.config import MCP_DEFAULT_USER_ID
+
     available = True  # Module is importable
+    default_configured = bool(MCP_DEFAULT_USER_ID and MCP_DEFAULT_USER_ID.strip())
     return McpStatusResponse(
         enabled=user_mcp_enabled,
         available=available,
         safe_tools=sorted(MCP_SAFE_TOOLS),
         blocked_tools=sorted(MCP_BLOCKED_TOOLS),
-        default_user_id="",
+        default_user_configured=default_configured,
         message=(
             "MCP Adapter is available. Default closed. "
             "Only low-risk tools are exposed to external agents."

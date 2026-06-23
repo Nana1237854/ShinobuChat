@@ -419,12 +419,11 @@ class LocalAgentSettingsServiceTests(unittest.TestCase):
 class McpDisabledTests(unittest.TestCase):
     def test_handle_request_rejects_tools_when_disabled(self):
         from app.mcp import server
-        from app.mcp import config as mcp_config
+        from app.mcp.tool_adapter import create_default_adapter
 
-        original = mcp_config.MCP_ENABLED
+        original = server.MCP_ENABLED
         try:
-            mcp_config.MCP_ENABLED = False
-            from app.mcp.tool_adapter import create_default_adapter
+            server.MCP_ENABLED = False
             adapter = create_default_adapter()
             resp = server.handle_request(
                 {"method": "tools/list", "id": 1}, adapter
@@ -433,16 +432,15 @@ class McpDisabledTests(unittest.TestCase):
             self.assertIn("error", resp)
             self.assertIn("disabled", resp["error"]["message"])
         finally:
-            mcp_config.MCP_ENABLED = original
+            server.MCP_ENABLED = original
 
     def test_handle_request_allows_initialize_when_disabled(self):
         from app.mcp import server
-        from app.mcp import config as mcp_config
+        from app.mcp.tool_adapter import create_default_adapter
 
-        original = mcp_config.MCP_ENABLED
+        original = server.MCP_ENABLED
         try:
-            mcp_config.MCP_ENABLED = False
-            from app.mcp.tool_adapter import create_default_adapter
+            server.MCP_ENABLED = False
             adapter = create_default_adapter()
             resp = server.handle_request(
                 {"method": "initialize", "id": 1}, adapter
@@ -451,7 +449,7 @@ class McpDisabledTests(unittest.TestCase):
             self.assertIn("result", resp)
             self.assertIn("ShinobuChat", resp["result"]["serverInfo"]["name"])
         finally:
-            mcp_config.MCP_ENABLED = original
+            server.MCP_ENABLED = original
 
 
 # =============================================================================
@@ -530,6 +528,180 @@ class WebSummarizerRuntimeConfigTests(unittest.TestCase):
         from app.services.web_summarizer_service import WebSummarizerService
         sig = inspect.signature(WebSummarizerService.summarize)
         self.assertIn("runtime_config", sig.parameters)
+
+
+# =============================================================================
+# MCP standalone server: ToolRegistry integration tests
+# =============================================================================
+
+class McpToolRegistryRealTests(unittest.TestCase):
+    """Verify MCP server uses real ToolRegistry when SC_MCP_ENABLED=true."""
+
+    @classmethod
+    def setUpClass(cls):
+        from app.api.deps import get_tool_registry
+        cls.registry = get_tool_registry()
+
+    def test_tool_registry_has_read_webpage(self):
+        schemas = self.registry.schemas()
+        names = {s.get("function", {}).get("name") for s in schemas}
+        self.assertIn("read_webpage", names)
+
+    def test_tool_registry_has_search_web(self):
+        schemas = self.registry.schemas()
+        names = {s.get("function", {}).get("name") for s in schemas}
+        self.assertIn("search_web", names)
+
+    def test_tool_registry_has_open_url(self):
+        schemas = self.registry.schemas()
+        names = {s.get("function", {}).get("name") for s in schemas}
+        self.assertIn("open_url", names)
+
+    def test_tool_registry_has_open_local_app(self):
+        schemas = self.registry.schemas()
+        names = {s.get("function", {}).get("name") for s in schemas}
+        self.assertIn("open_local_app", names)
+
+    def test_adapter_with_registry_calls_execute_verified(self):
+        """When ToolRegistry is provided, call_tool goes through execute_verified."""
+        from app.mcp.tool_adapter import create_default_adapter
+        adapter = create_default_adapter(tool_registry=self.registry)
+        tools = adapter.list_tools()
+        tool_names = {t.get("function", {}).get("name", t.get("name", "")) for t in tools}
+        self.assertIn("read_webpage", tool_names)
+        self.assertIn("search_web", tool_names)
+        self.assertIn("open_url", tool_names)
+
+    def test_list_tools_from_registry_excludes_blocked(self):
+        """Blocked tools must not appear in MCP tools/list from ToolRegistry."""
+        from app.mcp.tool_adapter import create_default_adapter
+        from app.mcp.config import MCP_BLOCKED_TOOLS
+        adapter = create_default_adapter(tool_registry=self.registry)
+        tools = adapter.list_tools()
+        tool_names = {
+            t.get("function", {}).get("name", t.get("name", ""))
+            for t in tools
+        }
+        for blocked in MCP_BLOCKED_TOOLS:
+            self.assertNotIn(blocked, tool_names,
+                             f"Blocked tool '{blocked}' must not appear in MCP tools/list")
+
+
+class McpUserContextGateTests(unittest.TestCase):
+    """Verify that tools requiring user context are gated."""
+
+    def test_server_rejects_open_local_app_without_default_user_id(self):
+        from app.mcp import server
+        from app.mcp.tool_adapter import create_default_adapter
+
+        orig_enabled = server.MCP_ENABLED
+        try:
+            server.MCP_ENABLED = True
+            adapter = create_default_adapter()
+            resp = server.handle_request(
+                {
+                    "method": "tools/call",
+                    "id": 1,
+                    "params": {"name": "open_local_app", "arguments": {}},
+                },
+                adapter,
+                default_user_id=None,
+            )
+            self.assertIsNotNone(resp)
+            result = resp.get("result", {})
+            content = result.get("content", [])
+            self.assertTrue(len(content) > 0,
+                            f"Expected error content, got result={result}")
+            text = content[0].get("text", "")
+            self.assertIn("SC_MCP_DEFAULT_USER_ID", text)
+            self.assertTrue(result.get("isError", False))
+        finally:
+            server.MCP_ENABLED = orig_enabled
+
+    def test_disabled_mcp_rejects_tools_list(self):
+        from app.mcp import server
+        from app.mcp.tool_adapter import create_default_adapter
+
+        orig = server.MCP_ENABLED
+        try:
+            server.MCP_ENABLED = False
+            adapter = create_default_adapter()
+            resp = server.handle_request(
+                {"method": "tools/list", "id": 2}, adapter
+            )
+            self.assertIn("error", resp)
+            self.assertIn("disabled", resp["error"]["message"])
+        finally:
+            server.MCP_ENABLED = orig
+
+    def test_disabled_mcp_rejects_tools_call(self):
+        from app.mcp import server
+        from app.mcp.tool_adapter import create_default_adapter
+
+        orig = server.MCP_ENABLED
+        try:
+            server.MCP_ENABLED = False
+            adapter = create_default_adapter()
+            resp = server.handle_request(
+                {"method": "tools/call", "id": 3,
+                 "params": {"name": "read_webpage", "arguments": {}}},
+                adapter,
+            )
+            self.assertIn("error", resp)
+            self.assertIn("disabled", resp["error"]["message"])
+        finally:
+            server.MCP_ENABLED = orig
+
+
+class ToolPolicyMCPTests(unittest.TestCase):
+    """Verify ToolPolicyService handles the four MCP-safe tools correctly."""
+
+    def test_open_local_app_is_local_app_group(self):
+        from app.services.tool_policy_service import _classify_tool
+        self.assertEqual(_classify_tool("open_local_app"), "local_app")
+
+    def test_open_url_is_browser_open_group(self):
+        from app.services.tool_policy_service import _classify_tool
+        self.assertEqual(_classify_tool("open_url"), "browser_open")
+
+    def test_read_webpage_is_web_search_group(self):
+        from app.services.tool_policy_service import _classify_tool
+        self.assertEqual(_classify_tool("read_webpage"), "web_search")
+
+    def test_search_web_is_web_search_group(self):
+        from app.services.tool_policy_service import _classify_tool
+        self.assertEqual(_classify_tool("search_web"), "web_search")
+
+    def test_work_mode_allows_all_mcp_tools(self):
+        """MCP uses 'work' mode — all 4 safe tools must be allowed."""
+        from app.services.tool_policy_service import ToolPolicyService
+        svc = ToolPolicyService()
+        for name in ("open_local_app", "open_url", "read_webpage", "search_web"):
+            decision = svc.check(name, {}, conversation_mode="work")
+            self.assertTrue(decision.allowed,
+                            f"Tool '{name}' should be allowed in work mode")
+
+    def test_focus_mode_blocks_web_search_for_read_webpage(self):
+        from app.services.tool_policy_service import ToolPolicyService
+        svc = ToolPolicyService()
+        decision = svc.check("read_webpage", {}, conversation_mode="focus")
+        # web_search group is not in focus mode's allowed groups
+        self.assertFalse(decision.allowed)
+
+    def test_focus_mode_blocks_search_web(self):
+        from app.services.tool_policy_service import ToolPolicyService
+        svc = ToolPolicyService()
+        decision = svc.check("search_web", {}, conversation_mode="focus")
+        self.assertFalse(decision.allowed)
+
+    def test_night_mode_blocks_web_search(self):
+        from app.services.tool_policy_service import ToolPolicyService
+        svc = ToolPolicyService()
+        for name in ("read_webpage", "search_web"):
+            decision = svc.check(name, {}, conversation_mode="night")
+            # web_search is blocked in night mode by night_suppression rule
+            self.assertFalse(decision.allowed,
+                             f"Tool '{name}' should be blocked in night mode")
 
 
 if __name__ == "__main__":
