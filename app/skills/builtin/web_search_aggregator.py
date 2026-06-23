@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.skills.base import CancelToken, OnProgress, Skill, SkillError, SkillProgress
-from app.services.web_search_service import WebSearchService
+from app.domains.browser.web_search_service import WebSearchService
 
 
 class WebSearchParams(BaseModel):

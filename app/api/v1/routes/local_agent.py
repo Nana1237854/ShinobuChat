@@ -14,7 +14,7 @@ from app.schemas.local_agent_settings import (
     LocalAgentSettingsOut,
     LocalAgentSettingsPatch,
 )
-from app.services.local_agent_settings_service import LocalAgentSettingsService
+from app.domains.local_agent.local_agent_settings_service import LocalAgentSettingsService
 
 router = APIRouter(prefix="/local-agent", tags=["local-agent"])
 

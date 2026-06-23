@@ -1,5 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useChatStream } from './hooks/useChatStream';
+import { useChatStream, ConversationList, MessageList, Composer, mergeServerMessages } from './features/chat';
 import {
   Bot,
   ChevronLeft,
@@ -18,16 +18,11 @@ import {
   UserRoundCog,
 } from 'lucide-react';
 import { AuthPanel } from './auth/AuthPanel';
-import { ConversationList } from './chat/ConversationList';
-import { MessageList } from './chat/MessageList';
-import { Composer } from './chat/Composer';
-import { mergeServerMessages } from './chat/messageState';
-import { Live2DStage } from './live2d/Live2DStage';
-import { LIP_SYNC_FFT_SIZE, LIP_SYNC_NOISE_FLOOR, LIP_SYNC_SCALE, LIP_SYNC_SMOOTHING, ANALYSER_SMOOTHING } from './live2d/lipSync';
+import { Live2DStage, LIP_SYNC_FFT_SIZE, LIP_SYNC_NOISE_FLOOR, LIP_SYNC_SCALE, LIP_SYNC_SMOOTHING, ANALYSER_SMOOTHING } from './features/live2d';
 import { PetTaskbar } from './desktop-pet/PetTaskbar';
 import { MusicPlayer } from './media/MusicPlayer';
-import { SettingsPage, type SettingsTab } from './settings/SettingsPage';
-import { ReminderBubble } from './reminders/ReminderBubble';
+import { SettingsPage, type SettingsTab } from './features/settings';
+import { ReminderBubble } from './features/reminders';
 import { getDueReminders, dismissReminder, snoozeReminder } from './api/reminders';
 import { getConversationMode } from './api/modes';
 import { ApiRequestError } from './api/http';

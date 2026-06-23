@@ -171,7 +171,7 @@ class ToolRegistry:
         try:
             import logging
 
-            from app.services.action_audit_service import ActionAuditService
+            from app.domains.observability.action_audit_service import ActionAuditService
 
             _tlog2 = logging.getLogger("shinobu.tool_audit")
             db = self.session_factory()

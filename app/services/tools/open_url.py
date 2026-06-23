@@ -2,8 +2,8 @@
 
 import json
 
-from app.services.browser_automation_service import BrowserAutomationService
-from app.services.local_agent_settings_service import LocalAgentSettingsService
+from app.domains.browser.browser_automation_service import BrowserAutomationService
+from app.domains.local_agent.local_agent_settings_service import LocalAgentSettingsService
 from app.services.tool_registry import Tool, ToolContext
 
 

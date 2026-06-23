@@ -3,7 +3,7 @@
 import json
 
 from app.services.tool_registry import Tool, ToolContext
-from app.services.web_reader_service import WebReaderService
+from app.domains.browser.web_reader_service import WebReaderService
 
 
 def create_tool(registry) -> Tool:

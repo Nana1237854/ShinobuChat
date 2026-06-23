@@ -66,7 +66,7 @@ def create_app() -> FastAPI:
         init_db()
 
         # Phase 3: JobScheduler replaces raw while loops
-        from app.services.jobs.job_registry import create_default_scheduler
+        from app.domains.jobs.job_registry import create_default_scheduler
 
         scheduler = create_default_scheduler()
         app.state.job_scheduler = scheduler

@@ -5,10 +5,10 @@ import unittest
 
 from app.mcp.config import MCP_BLOCKED_TOOLS, MCP_SAFE_TOOLS
 from app.mcp.tool_adapter import create_default_adapter
-from app.services.download_candidate_extractor import DownloadCandidateExtractor
-from app.services.download_risk_classifier import DownloadRiskClassifier
-from app.services.web_reader_service import WebReaderService
-from app.services.web_search_service import WebSearchService
+from app.domains.browser.download.download_candidate_extractor import DownloadCandidateExtractor
+from app.domains.browser.download.download_risk_classifier import DownloadRiskClassifier
+from app.domains.browser.web_reader_service import WebReaderService
+from app.domains.browser.web_search_service import WebSearchService
 from app.schemas.local_agent_settings import LocalAgentSettingsOut, LocalAgentSettingsPatch
 
 
@@ -378,7 +378,7 @@ class EdgeCaseTests(unittest.TestCase):
 
 class LocalAgentSettingsServiceTests(unittest.TestCase):
     def test_defaults_all_enabled(self):
-        from app.services.local_agent_settings_service import LocalAgentSettingsService
+        from app.domains.local_agent.local_agent_settings_service import LocalAgentSettingsService
         from app.db.session import SessionLocal
 
         db = SessionLocal()
@@ -399,7 +399,7 @@ class LocalAgentSettingsServiceTests(unittest.TestCase):
         self.assertEqual(err.detail, "test")
 
     def test_is_local_launcher_enabled_no_rows(self):
-        from app.services.local_agent_settings_service import LocalAgentSettingsService
+        from app.domains.local_agent.local_agent_settings_service import LocalAgentSettingsService
         from app.db.session import SessionLocal
 
         db = SessionLocal()
@@ -515,7 +515,7 @@ class TrustedSourceItemSchemaTests(unittest.TestCase):
 
 class WebSummarizerRuntimeConfigTests(unittest.TestCase):
     def test_summarize_accepts_runtime_config(self):
-        from app.services.web_summarizer_service import WebSummarizerService
+        from app.domains.browser.web_summarizer_service import WebSummarizerService
         svc = WebSummarizerService()
         result = svc.summarize(
             "https://example.com",
@@ -525,7 +525,7 @@ class WebSummarizerRuntimeConfigTests(unittest.TestCase):
 
     def test_runtime_config_keyword(self):
         import inspect
-        from app.services.web_summarizer_service import WebSummarizerService
+        from app.domains.browser.web_summarizer_service import WebSummarizerService
         sig = inspect.signature(WebSummarizerService.summarize)
         self.assertIn("runtime_config", sig.parameters)
 

@@ -4,7 +4,7 @@ import json
 
 from app.services.config_service import ConfigService
 from app.services.tool_registry import Tool, ToolContext
-from app.services.web_search_service import WebSearchService
+from app.domains.browser.web_search_service import WebSearchService
 
 
 def create_tool(registry) -> Tool:

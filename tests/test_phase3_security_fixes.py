@@ -16,16 +16,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.services.skill_run_log_service import SkillRunLogService
+from app.domains.observability.skill_run_log_service import SkillRunLogService
 from app.services.tool_policy_service import ToolPolicyService, _classify_tool
-from app.services.action_audit_service import (
+from app.domains.observability.action_audit_service import (
     SENSITIVE_QUERY_KEYS,
     _redact_url,
     _sanitize_value,
     redact_payload,
 )
-from app.services.behavior_engine import BehaviorDecision
-from app.services.capabilities.capability_registry import CapabilityRegistry
+from app.domains.agent.behavior_engine import BehaviorDecision
+from app.domains.capabilities.capability_registry import CapabilityRegistry
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -265,7 +265,7 @@ class TestCapabilityDecisionSerialization:
     """Dataclass is explicitly converted to dict for JSON serialization."""
 
     def test_decision_serialized_as_dict(self):
-        from app.services.behavior_engine import CapabilityDecision
+        from app.domains.agent.behavior_engine import CapabilityDecision
 
         decision = CapabilityDecision(enabled=True, requires_confirmation=False, reason="test")
 

@@ -23,8 +23,8 @@ class DirectActionRunner:
         if da is None:
             raise ValueError("direct_action is required")
 
-        from app.services.local_agent_settings_service import LocalAgentSettingsService
-        from app.services.local_app_service import LocalAppService
+        from app.domains.local_agent.local_agent_settings_service import LocalAgentSettingsService
+        from app.domains.local_agent.local_app_service import LocalAppService
 
         db = self.session_factory()
         try:

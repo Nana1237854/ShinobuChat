@@ -62,7 +62,7 @@ class ConversationTurnService:
 
         # ── Phase 2: PromptTrace ──
         try:
-            from app.services.prompt_trace_service import PromptTraceService
+            from app.domains.observability.prompt_trace_service import PromptTraceService
 
             trace_ctx = getattr(agent_plan, "trace_context", {}) or {}
             PromptTraceService(self.db).create_trace(

@@ -10,9 +10,9 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.session import Base
 from app.models.job_run_log import JobRunLog
-from app.services.jobs.job_base import BaseJob, JobResult
-from app.services.jobs.job_run_log_service import JobRunLogService
-from app.services.jobs.job_scheduler import JobScheduler
+from app.domains.jobs.job_base import BaseJob, JobResult
+from app.domains.jobs.job_run_log_service import JobRunLogService
+from app.domains.jobs.job_scheduler import JobScheduler
 
 
 class SuccessJob(BaseJob):

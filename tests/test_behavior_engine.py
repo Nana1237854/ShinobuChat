@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.services.behavior_engine import BehaviorContext, BehaviorEngine
+from app.domains.agent.behavior_engine import BehaviorContext, BehaviorEngine
 
 
 def make_context(mode: str = "companion", **overrides) -> BehaviorContext:

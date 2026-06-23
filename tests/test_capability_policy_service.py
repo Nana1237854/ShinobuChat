@@ -14,7 +14,7 @@ from app.core.exceptions import ForbiddenError
 from app.db.session import Base
 from app.models.user import User
 from app.models.user_config import UserConfig
-from app.services.capabilities.capability_policy_service import CapabilityPolicyService
+from app.domains.capabilities.capability_policy_service import CapabilityPolicyService
 
 
 def _save_local_agent_settings(db, user_id, data: dict):

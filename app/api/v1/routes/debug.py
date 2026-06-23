@@ -17,17 +17,17 @@ from app.core.exceptions import NotFoundError
 from app.db.session import get_db
 from app.schemas.action_audit import ActionAuditItem, ActionAuditListResponse
 from app.schemas.debug_trace import PromptTraceItem
-from app.services.action_audit_service import ActionAuditService
-from app.services.behavior_engine import BehaviorEngine, BehaviorContext
-from app.services.capabilities.capability_policy_service import CapabilityPolicyService
-from app.services.capabilities.capability_registry import CapabilityRegistry
-from app.services.local_agent_settings_service import LocalAgentSettingsService
-from app.services.prompt_trace_service import PromptTraceService
-from app.services.skill_run_log_service import SkillRunLogService
-from app.services.tasks.task_run_service import TaskRunService
-from app.services.tasks.task_event_service import TaskEventService
-from app.services.tasks.task_event_store import TaskEventStore
-from app.services.jobs.job_run_log_service import JobRunLogService
+from app.domains.observability.action_audit_service import ActionAuditService
+from app.domains.agent.behavior_engine import BehaviorEngine, BehaviorContext
+from app.domains.capabilities.capability_policy_service import CapabilityPolicyService
+from app.domains.capabilities.capability_registry import CapabilityRegistry
+from app.domains.local_agent.local_agent_settings_service import LocalAgentSettingsService
+from app.domains.observability.prompt_trace_service import PromptTraceService
+from app.domains.observability.skill_run_log_service import SkillRunLogService
+from app.domains.tasks.task_run_service import TaskRunService
+from app.domains.tasks.task_event_service import TaskEventService
+from app.domains.tasks.task_event_store import TaskEventStore
+from app.domains.jobs.job_run_log_service import JobRunLogService
 
 router = APIRouter(prefix="/debug", tags=["debug"])
 

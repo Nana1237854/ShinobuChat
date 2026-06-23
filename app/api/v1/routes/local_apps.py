@@ -14,8 +14,8 @@ from app.schemas.local_app import (
     LocalAppTestResponse,
     LocalAppUpdate,
 )
-from app.services.local_agent_settings_service import LocalAgentSettingsService
-from app.services.local_app_service import LocalAppService
+from app.domains.local_agent.local_agent_settings_service import LocalAgentSettingsService
+from app.domains.local_agent.local_app_service import LocalAppService
 
 router = APIRouter(prefix="/local-apps", tags=["local-apps"])
 

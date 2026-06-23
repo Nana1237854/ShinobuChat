@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user_id
 from app.db.session import get_db
 from app.mcp.config import MCP_ENABLED, MCP_SAFE_TOOLS, MCP_BLOCKED_TOOLS, MCP_DEFAULT_USER_ID
-from app.services.local_agent_settings_service import LocalAgentSettingsService
+from app.domains.local_agent.local_agent_settings_service import LocalAgentSettingsService
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 

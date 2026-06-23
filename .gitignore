@@ -26,3 +26,7 @@ output/
 
 .DS_Store
 Thumbs.db
+.gstack/
+
+# Course papers (not part of the project)
+docs/coursework/

@@ -24,8 +24,8 @@ def create_tool(registry) -> Tool:
 
         # Permission check (F16)
         from app.db.session import SessionLocal
-        from app.services.local_agent_settings_service import LocalAgentSettingsService
-        from app.services.local_app_service import LocalAppService
+        from app.domains.local_agent.local_agent_settings_service import LocalAgentSettingsService
+        from app.domains.local_agent.local_app_service import LocalAppService
 
         db = SessionLocal()
         try:

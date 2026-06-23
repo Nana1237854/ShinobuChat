@@ -355,7 +355,7 @@ class AgentCoordinator:
     def _load_local_agent_settings(user_id: uuid.UUID) -> dict:
         try:
             from app.db.session import SessionLocal
-            from app.services.local_agent_settings_service import LocalAgentSettingsService
+            from app.domains.local_agent.local_agent_settings_service import LocalAgentSettingsService
 
             db = SessionLocal()
             try:
@@ -375,7 +375,7 @@ class AgentCoordinator:
         content: str,
         local_agent_settings: dict,
     ):
-        from app.services.behavior_engine import BehaviorEngine, BehaviorContext
+        from app.domains.agent.behavior_engine import BehaviorEngine, BehaviorContext
 
         return BehaviorEngine().decide(
             BehaviorContext(
@@ -404,7 +404,7 @@ class AgentCoordinator:
 
         try:
             from app.db.session import SessionLocal
-            from app.services.skill_run_log_service import SkillRunLogService
+            from app.domains.observability.skill_run_log_service import SkillRunLogService
 
             db = SessionLocal()
             try:

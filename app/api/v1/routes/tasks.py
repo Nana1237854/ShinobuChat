@@ -16,9 +16,9 @@ from starlette.responses import StreamingResponse
 
 from app.api.deps import get_current_user_id
 from app.db.session import get_db
-from app.services.tasks.task_event_store import TaskEventStore
-from app.services.tasks.task_event_service import TaskEventService
-from app.services.tasks.task_run_service import TaskRunService
+from app.domains.tasks.task_event_store import TaskEventStore
+from app.domains.tasks.task_event_service import TaskEventService
+from app.domains.tasks.task_run_service import TaskRunService
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 

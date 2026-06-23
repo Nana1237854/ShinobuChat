@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.services.capabilities.capability_registry import Capability, CapabilityRegistry
+from app.domains.capabilities.capability_registry import Capability, CapabilityRegistry
 
 
 class TestCapabilityRegistry:

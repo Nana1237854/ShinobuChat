@@ -11,7 +11,7 @@ from app.schemas.local_app import (
     PendingActionResponse,
     PendingActionConfirmRequest,
 )
-from app.services.local_app_service import LocalAppService
+from app.domains.local_agent.local_app_service import LocalAppService
 
 router = APIRouter(prefix="/pending-actions", tags=["pending-actions"])
 
