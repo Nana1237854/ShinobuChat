@@ -59,11 +59,17 @@ class AgentOrchestrator:
         *,
         user_skills: list[Skill] | None = None,
         ai_config: dict[str, Any] | None = None,
+        conversation_mode: str = "companion",
+        route_mode: str | None = None,
     ) -> Iterator[StreamEvent | str]:
         tools = self.tool_registry.schemas()
         context = ToolContext(
             history=history,
             user_skills={skill.name: skill for skill in user_skills or []},
+            metadata={
+                "conversation_mode": conversation_mode,
+                "route_mode": route_mode or "agent",
+            },
         )
         for step in range(max(settings.agent_max_steps, 1)):
             yield StreamEvent(

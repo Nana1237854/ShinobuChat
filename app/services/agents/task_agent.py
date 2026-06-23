@@ -68,10 +68,14 @@ class TaskAgent:
         *,
         user_skills: list[Skill] | None = None,
         ai_config: dict[str, Any] | None = None,
+        conversation_mode: str = "companion",
+        route_mode: str | None = None,
     ) -> Iterator[StreamEvent | str]:
         yield from self.agent_orchestrator.run(
             messages,
             history,
             user_skills=user_skills,
             ai_config=ai_config,
+            conversation_mode=conversation_mode,
+            route_mode=route_mode,
         )

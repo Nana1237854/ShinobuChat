@@ -166,12 +166,15 @@ class PrefixAndVerificationTests(unittest.TestCase):
         registry = ToolRegistry(SkillRegistry(Path("skills")))
         context = ToolContext(history=[])
         completed = type("Completed", (), {"stdout": "server error", "stderr": "", "returncode": 22})()
-        with patch("app.services.tools.shell_command.subprocess.run", return_value=completed):
-            result = registry.execute_verified(
-                "shell_command",
-                {"command": "curl https://example.com"},
-                context,
-            )
+        with patch("app.services.tool_policy_service.ToolPolicyService.check") as mock_check:
+            from app.services.tool_policy_service import ToolPolicyDecision
+            mock_check.return_value = ToolPolicyDecision(True, "test bypass", {"rule": "test_bypass"})
+            with patch("app.services.tools.shell_command.subprocess.run", return_value=completed):
+                result = registry.execute_verified(
+                    "shell_command",
+                    {"command": "curl https://example.com"},
+                    context,
+                )
 
         self.assertFalse(result.verified)
         self.assertIn("code 22", result.reason)

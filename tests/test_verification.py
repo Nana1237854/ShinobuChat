@@ -16,6 +16,7 @@ from app.models.user_config import UserConfig
 from app.services.agent_orchestrator import AgentOrchestrator
 from app.services.skill_service import Skill, SkillRegistry
 from app.services.stream_events import StreamEvent
+from app.services.tool_policy_service import ToolPolicyDecision
 from app.services.tool_registry import ToolContext, ToolRegistry
 from app.services.tool_verifier import ToolVerifier, VerificationResult
 
@@ -500,6 +501,14 @@ class VerificationEndToEndTests(unittest.TestCase):
 
     def setUp(self):
         self.registry = ToolRegistry(SkillRegistry(Path("skills")))
+        self._policy_patcher = patch(
+            "app.services.tool_policy_service.ToolPolicyService.check",
+            return_value=ToolPolicyDecision(True, "test bypass", {"rule": "test_bypass"}),
+        )
+        self._policy_patcher.start()
+
+    def tearDown(self):
+        self._policy_patcher.stop()
 
     def test_valid_result_returns_verified(self):
         context = ToolContext(history=[])

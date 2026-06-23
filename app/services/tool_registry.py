@@ -100,7 +100,31 @@ class ToolRegistry:
         arguments: dict,
         context: ToolContext,
     ) -> VerifiedToolResult:
+        from app.services.tool_policy_service import ToolPolicyService
         from app.services.tool_verifier import ToolVerifier
+
+        conversation_mode = str(context.metadata.get("conversation_mode") or "companion")
+        route_mode = str(context.metadata.get("route_mode") or "")
+
+        # ── Policy gate: deny before any tool handler is called ──
+        policy = ToolPolicyService().check(
+            name,
+            arguments,
+            conversation_mode=conversation_mode,
+            route_mode=route_mode,
+        )
+        if not policy.allowed:
+            return VerifiedToolResult(
+                output="",
+                verified=False,
+                reason=f"Tool policy denied: {policy.reason}",
+                checked_fields={
+                    **policy.checked_fields,
+                    "policy_allowed": False,
+                    "conversation_mode": conversation_mode,
+                    "route_mode": route_mode,
+                },
+            )
 
         output = self.execute(name, arguments, context)
         verification = ToolVerifier(session_factory=self.session_factory).verify(
@@ -110,5 +134,10 @@ class ToolRegistry:
             output=output,
             verified=verification.passed,
             reason=verification.reason,
-            checked_fields=verification.checked_fields,
+            checked_fields={
+                **verification.checked_fields,
+                "policy_allowed": True,
+                "conversation_mode": conversation_mode,
+                "route_mode": route_mode,
+            },
         )

@@ -35,6 +35,7 @@ class MessageStreamState:
     router_reason: str
     progress_events: list[StreamEvent]
     reply_text: str
+    conversation_mode: str = "companion"
 
 
 class MessageService:
@@ -99,7 +100,8 @@ class MessageService:
             for event in state.progress_events:
                 yield self._format_event(event)
             for item in self._run_task_agent(
-                messages, history[:-1], payload.user_id, ai_config
+                messages, history[:-1], payload.user_id, ai_config,
+                conversation_mode=state.conversation_mode,
             ):
                 if isinstance(item, StreamEvent):
                     yield self._format_event(item)
@@ -197,6 +199,7 @@ class MessageService:
             router_reason=agent_plan.router_decision.reason,
             progress_events=agent_plan.progress_events,
             reply_text="",
+            conversation_mode=agent_plan.conversation_mode,
         ), agent_plan.messages
 
     def save_sentences(self, state: MessageStreamState, sentences: list[str]) -> list[Message]:
@@ -274,6 +277,7 @@ class MessageService:
         history: list[Message],
         user_id,
         ai_config,
+        conversation_mode: str = "companion",
     ):
         user_skills = (
             self.skill_manager.runtime_skills(user_id)
@@ -286,6 +290,8 @@ class MessageService:
                 history,
                 user_skills=user_skills,
                 ai_config=ai_config,
+                conversation_mode=conversation_mode,
+                route_mode="agent",
             )
             return
 

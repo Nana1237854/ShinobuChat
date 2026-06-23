@@ -45,14 +45,25 @@ class ReminderSchedulerService:
         self.db = db
         self._mode_service = mode_service
 
-    def _get_user_mode(self, user_id: UUID) -> str:
+    def _get_user_mode(self, user_id: UUID) -> tuple[str, str]:
+        """Return (mode, reason) — logs a warning when fallback is used."""
         if self._mode_service is None:
-            return "companion"
+            logger.warning(
+                "ModeService unavailable for reminders user_id=%s, falling back to companion",
+                user_id,
+            )
+            return "companion", "fallback: no ModeService"
+
         try:
             mode = self._mode_service.get_mode(user_id)
-            return mode.value
-        except Exception:
-            return "companion"
+            return mode.value, "loaded"
+        except Exception as exc:
+            logger.warning(
+                "Falling back to companion mode for reminders user_id=%s: %s",
+                user_id,
+                exc,
+            )
+            return "companion", "fallback"
 
     # ---- scanning ----
 
@@ -138,7 +149,7 @@ class ReminderSchedulerService:
             return None
 
         # Mode-aware filtering
-        user_mode = self._get_user_mode(todo.user_id)
+        user_mode, _mode_reason = self._get_user_mode(todo.user_id)
         if user_mode in ("focus", "night") and kind == "due_soon":
             return None  # Only urgent reminders in focus/night mode
         if user_mode == "focus" and todo.priority and todo.priority < 2 and kind == "due_now":

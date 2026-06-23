@@ -22,6 +22,7 @@ class AgentPlan:
     memory_context: list[str]
     messages: list[dict]
     progress_events: list[StreamEvent]
+    conversation_mode: str = "companion"
 
 
 class AgentCoordinator:
@@ -50,6 +51,11 @@ class AgentCoordinator:
     ) -> AgentPlan:
         decision = self.resolve_route(requested_route_mode, content, history)
         memory_context = self.memory_agent.search(user_id, content)
+
+        # Conversation mode context — dynamic turn-level hint, NOT base_system
+        conversation_mode, mode_context = self._conversation_mode_context(user_id)
+        if mode_context:
+            memory_context = [mode_context, *memory_context]
 
         # Persona tone instructions — injected as dynamic context, NOT base_system
         persona_context = self._persona_tone_context(user_id)
@@ -97,6 +103,7 @@ class AgentCoordinator:
             memory_context=memory_context,
             messages=messages,
             progress_events=progress_events,
+            conversation_mode=conversation_mode,
         )
 
     def resolve_route(
@@ -121,13 +128,51 @@ class AgentCoordinator:
         *,
         user_skills: list[Skill] | None = None,
         ai_config: dict[str, Any] | None = None,
+        conversation_mode: str = "companion",
+        route_mode: str | None = None,
     ) -> Iterator[StreamEvent | str]:
         yield from self.task_agent.run(
             messages,
             history,
             user_skills=user_skills,
             ai_config=ai_config,
+            conversation_mode=conversation_mode,
+            route_mode=route_mode,
         )
+
+    @staticmethod
+    def _conversation_mode_context(user_id: uuid.UUID) -> tuple[str, str]:
+        """Return (mode_value, mode_context_prompt) for the current user.
+
+        Falls back to 'companion' with a warning log — never interrupts chat.
+        The returned context string is injected as dynamic TurnScratch, NOT
+        into the fixed base_system / PrefixCacheManager zone.
+        """
+        try:
+            from app.db.session import SessionLocal
+            from app.services.mode_service import ModeService
+
+            db = SessionLocal()
+            try:
+                svc = ModeService(db)
+                mode = svc.get_mode(user_id)
+                mode_value = mode.value
+                prompt_section = svc.build_roleplay_prompt_section(mode_value)
+                context = ""
+                if prompt_section:
+                    context = f"【当前情景模式】\n{prompt_section}"
+                return mode_value, context
+            finally:
+                db.close()
+        except Exception as exc:
+            import logging
+            logger_mc = logging.getLogger("shinobu.coordinator")
+            logger_mc.warning(
+                "Falling back to companion mode context for user_id=%s: %s",
+                user_id,
+                exc,
+            )
+            return "companion", ""
 
     @staticmethod
     def _persona_tone_context(user_id: uuid.UUID) -> str:
