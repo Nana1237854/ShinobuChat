@@ -111,6 +111,29 @@ def create_app() -> FastAPI:
             logger = logging.getLogger("shinobu.reminder")
             asyncio.create_task(reminder_loop())
 
+        if settings.diary_auto_generate_enabled:
+            import asyncio
+
+            from app.db.session import SessionLocal
+            from app.services.diary_scheduler_service import DiarySchedulerService
+
+            async def diary_loop() -> None:
+                while True:
+                    try:
+                        await asyncio.sleep(settings.diary_background_scan_interval_seconds)
+                        db = SessionLocal()
+                        try:
+                            service = DiarySchedulerService(db)
+                            generated = service.scan_and_generate()
+                            if generated:
+                                _startup_logger.info("Auto-diary generated for %d users", generated)
+                        finally:
+                            db.close()
+                    except Exception:
+                        _startup_logger.exception("Diary background scan failed")
+
+            asyncio.create_task(diary_loop())
+
     @app.get("/health", tags=["health"])
     async def health_check() -> dict[str, str]:
         return {"status": "ok"}

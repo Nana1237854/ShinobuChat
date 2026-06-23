@@ -32,3 +32,25 @@ export function getMemoryContext(
     query: options,
   });
 }
+
+export function deleteMemory(
+  accessToken: string,
+  memoryId: string,
+): Promise<void> {
+  return requestJson<void>(`/memories/${encodeURIComponent(memoryId)}`, {
+    method: 'DELETE',
+    accessToken,
+  });
+}
+
+export function updateMemory(
+  accessToken: string,
+  memoryId: string,
+  payload: { pinned?: boolean; archived?: boolean; archived_reason?: string },
+): Promise<void> {
+  return requestJson<void>(`/memories/${encodeURIComponent(memoryId)}`, {
+    method: 'PATCH',
+    accessToken,
+    body: payload,
+  });
+}

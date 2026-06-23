@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BookOpen, Calendar, ChevronLeft, ChevronRight, RefreshCw, Sparkles, X } from 'lucide-react';
-import { generateDiary, getDiaryByDate, listDiaries } from '../api/diaries';
+import { exportDiaries, generateDiary, getDiaryByDate, listDiaries } from '../api/diaries';
 import { ApiRequestError } from '../api/http';
 import type { DiaryDetail, DiaryItem } from '../types';
 
@@ -243,6 +243,24 @@ export function DiaryPanel({ accessToken }: { accessToken: string }) {
     setDetailError(null);
   }, []);
 
+  const handleExport = useCallback(async () => {
+    setError(null);
+    try {
+      const toDate = today;
+      const fromDate = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
+      const { text, filename } = await exportDiaries(accessToken, fromDate, toDate);
+      const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '导出失败');
+    }
+  }, [accessToken, today, currentYear, currentMonth]);
+
   const monthLabel = `${currentYear}年${currentMonth}月`;
 
   return (
@@ -261,6 +279,13 @@ export function DiaryPanel({ accessToken }: { accessToken: string }) {
         >
           <Sparkles size={16} />
           {generating ? '正在生成...' : '生成今日日记'}
+        </button>
+        <button
+          type="button"
+          className="settings-secondary-button diary-export-btn"
+          onClick={() => handleExport()}
+        >
+          导出 Markdown
         </button>
       </header>
 

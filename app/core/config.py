@@ -70,6 +70,17 @@ class Settings(BaseSettings):
     agent_max_steps: int = Field(default=50)
 
     diary_enabled: bool = Field(default=True)
+    # ---- Auto nightly diary (B23A) ----
+    # GLOBAL switch: must be True for the background diary_loop to start at all
+    diary_auto_generate_enabled: bool = Field(default=False)
+    # GLOBAL: target hour of the day (0-23) when auto-generation fires, in each user's timezone
+    diary_auto_generate_hour: int = Field(default=23)
+    # GLOBAL: seconds between diary_loop scan iterations
+    diary_background_scan_interval_seconds: int = Field(default=3600)
+    # PER-USER: whether this specific user wants auto diary generation
+    auto_diary_enabled: bool = Field(default=False)
+    # PER-USER: IANA timezone string for determining "night" for this user
+    auto_diary_timezone: str = Field(default="Asia/Shanghai")
     memory_enabled: bool = Field(default=True)
     memory_pgvector_enabled: bool = Field(default=False)
     memory_max_results: int = Field(default=3)

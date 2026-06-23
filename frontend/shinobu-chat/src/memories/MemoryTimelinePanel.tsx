@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
-import { Clock3, Search, Trash2 } from 'lucide-react';
-import { getMemoryContext, getMemoryTimeline, searchMemories } from '../api/memories';
+import { Archive, Clock3, Pin, Search, Trash2 } from 'lucide-react';
+import { deleteMemory, getMemoryContext, getMemoryTimeline, searchMemories, updateMemory } from '../api/memories';
 import type { MemoryContext, MemorySearchResult, MemoryTimelineItem } from '../types';
 
 type MemoryTimelinePanelProps = {
@@ -121,6 +121,39 @@ export function MemoryTimelinePanel({ accessToken }: MemoryTimelinePanelProps) {
     }
   };
 
+  const handleDeleteMemory = async (memoryId: string) => {
+    if (!window.confirm('确定要永久删除这条记忆吗？此操作不可撤销。')) return;
+    try {
+      await deleteMemory(accessToken, memoryId);
+      setTimeline(current => current.filter(m => m.memory_id !== memoryId));
+      setSearchResults(current => current.filter(m => 'memory_id' in m && m.memory_id !== memoryId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '删除失败');
+    }
+  };
+
+  const handleTogglePin = async (memoryId: string, currentPinned: boolean) => {
+    try {
+      await updateMemory(accessToken, memoryId, { pinned: !currentPinned });
+      setTimeline(current =>
+        current.map(m => m.memory_id === memoryId ? { ...m, pinned: !currentPinned } : m),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '操作失败');
+    }
+  };
+
+  const handleToggleArchive = async (memoryId: string) => {
+    if (!window.confirm('归档这条记忆？归档后可从时间线隐藏。')) return;
+    try {
+      await updateMemory(accessToken, memoryId, { archived: true, archived_reason: 'user_manual' });
+      setTimeline(current => current.filter(m => m.memory_id !== memoryId));
+      setSearchResults(current => current.filter(m => !('memory_id' in m) || m.memory_id !== memoryId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '归档失败');
+    }
+  };
+
   return (
     <section className="memory-panel" aria-label="记忆时间线">
       <header className="settings-content-header">
@@ -199,8 +232,32 @@ export function MemoryTimelinePanel({ accessToken }: MemoryTimelinePanelProps) {
                           <button type="button" className="settings-secondary-button" onClick={() => toggleContext(memoryId)}>
                             {expanded ? '收起上下文' : '查看上下文'}
                           </button>
-                          <button type="button" className="settings-secondary-button" disabled title="删除记忆功能后续开放">
-                            <Trash2 size={14} />删除记忆
+                          <button
+                            type="button"
+                            className="settings-secondary-button"
+                            title={item.pinned ? '取消置顶' : '置顶'}
+                            onClick={() => handleTogglePin(memoryId, item.pinned ?? false)}
+                          >
+                            <Pin size={14} />
+                            {item.pinned ? '已置顶' : '置顶'}
+                          </button>
+                          <button
+                            type="button"
+                            className="settings-secondary-button"
+                            title="归档"
+                            onClick={() => handleToggleArchive(memoryId)}
+                          >
+                            <Archive size={14} />
+                            归档
+                          </button>
+                          <button
+                            type="button"
+                            className="settings-secondary-button settings-btn-danger"
+                            title="删除记忆"
+                            onClick={() => handleDeleteMemory(memoryId)}
+                          >
+                            <Trash2 size={14} />
+                            删除记忆
                           </button>
                         </div>
                         {expanded ? (

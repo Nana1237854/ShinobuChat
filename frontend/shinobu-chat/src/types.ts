@@ -202,6 +202,7 @@ export type MemoryTimelineItem = {
   source_msg_id?: string | null;
   related_conversation_id?: string | null;
   tags: string[];
+  pinned?: boolean;
   time_bucket: 'today' | 'this_week' | 'this_month' | 'earlier' | string;
 };
 
@@ -214,6 +215,8 @@ export type MemorySearchResult = {
   related_conversation_id?: string | null;
   score?: number | null;
   source_message_summary?: string | null;
+  pinned?: boolean;
+  tags?: string[];
 };
 
 export type MemoryContextMessage = {

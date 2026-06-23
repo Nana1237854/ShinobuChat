@@ -126,6 +126,21 @@ class DiaryService:
         rows = query.order_by(Diary.date.desc()).offset(offset).limit(limit).all()
         return [DiaryOut.model_validate(row) for row in rows]
 
+    def list_diaries_in_range(
+        self, user_id: UUID, from_date: date, to_date: date
+    ) -> list[DiaryOut]:
+        rows = (
+            self.db.query(Diary)
+            .filter(
+                Diary.user_id == user_id,
+                Diary.date >= from_date,
+                Diary.date <= to_date,
+            )
+            .order_by(Diary.date.asc())
+            .all()
+        )
+        return [DiaryOut.model_validate(row) for row in rows]
+
     def get_by_date(self, user_id: UUID, diary_date: date) -> DiaryDetail:
         row = (
             self.db.query(Diary)

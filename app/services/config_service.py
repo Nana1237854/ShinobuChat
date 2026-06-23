@@ -41,6 +41,8 @@ CONFIG_SPECS: dict[str, ConfigSpec] = {
     "asr_engine": ConfigSpec(str),
     "whisper_api_key": ConfigSpec(str, True),
     "diary_enabled": ConfigSpec(bool),
+    "auto_diary_enabled": ConfigSpec(bool),
+    "auto_diary_timezone": ConfigSpec(str),
 }
 
 

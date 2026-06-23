@@ -35,3 +35,23 @@ export function generateDiary(
     body: payload ?? {},
   });
 }
+
+export async function exportDiaries(
+  accessToken: string,
+  fromDate: string,
+  toDate: string,
+): Promise<{ text: string; filename: string }> {
+  const baseUrl = '/api/v1';
+  const params = new URLSearchParams({ from: fromDate, to: toDate, format: 'markdown' });
+  const response = await fetch(`${baseUrl}/diaries/export?${params}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({ detail: 'Export failed' }));
+    throw new Error((detail as { detail?: string }).detail || 'Export failed');
+  }
+  const text = await response.text();
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const filenameMatch = disposition.match(/filename="?([^"]+)"?/);
+  return { text, filename: filenameMatch?.[1] || 'diaries-export.md' };
+}

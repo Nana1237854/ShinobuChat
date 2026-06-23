@@ -216,3 +216,136 @@ class DiaryServiceTests(unittest.TestCase):
             db.add(dup)
             with self.assertRaises(Exception):
                 db.commit()
+
+
+class DiarySchedulerServiceTests(unittest.TestCase):
+    def setUp(self):
+        from app.db.session import Base
+        from app.models.user_config import UserConfig
+
+        self.engine = create_engine("sqlite:///:memory:", future=True)
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine, future=True)
+        self.user_id = uuid.uuid4()
+        self.today = date.today()
+        with self.Session() as db:
+            db.add(User(id=self.user_id, email="sched@t.com", hashed_password="x", display_name="S"))
+            db.add(Conversation(user_id=self.user_id, title="Sched Conv"))
+            db.commit()
+
+        # Add some messages for context
+        with self.Session() as db:
+            conv = db.query(Conversation).filter(Conversation.user_id == self.user_id).first()
+            for i in range(3):
+                db.add(Message(
+                    conversation_id=conv.id, role="user" if i % 2 == 0 else "assistant",
+                    content=f"Scheduler message {i}",
+                    created_at=datetime.now(timezone.utc) - timedelta(hours=i),
+                ))
+            db.commit()
+
+    def tearDown(self):
+        from app.db.session import Base
+
+        Base.metadata.drop_all(bind=self.engine)
+
+    def _set_user_config(self, user_id, field_name, field_value):
+        from app.models.user_config import UserConfig
+
+        with self.Session() as db:
+            existing = db.query(UserConfig).filter(
+                UserConfig.user_id == user_id, UserConfig.field_name == field_name
+            ).first()
+            if existing:
+                existing.field_value = str(field_value).lower()
+            else:
+                db.add(UserConfig(user_id=user_id, field_name=field_name, field_value=str(field_value).lower()))
+            db.commit()
+
+    def test_has_today_diary_returns_true_when_exists(self):
+        from app.services.diary_scheduler_service import DiarySchedulerService
+
+        with self.Session() as db:
+            db.add(Diary(user_id=self.user_id, date=self.today, title="T", summary="S", content="C", tags=[]))
+            db.commit()
+
+        with self.Session() as db:
+            svc = DiarySchedulerService(db)
+            self.assertTrue(svc._has_today_diary(self.user_id, self.today))
+
+    def test_has_today_diary_returns_false_when_missing(self):
+        from app.services.diary_scheduler_service import DiarySchedulerService
+
+        with self.Session() as db:
+            svc = DiarySchedulerService(db)
+            self.assertFalse(svc._has_today_diary(self.user_id, self.today))
+
+    def test_user_without_auto_diary_config_is_skipped(self):
+        from app.services.diary_scheduler_service import DiarySchedulerService
+
+        with self.Session() as db:
+            svc = DiarySchedulerService(db)
+            generated = svc.scan_and_generate()
+            self.assertEqual(generated, 0)
+
+    def test_user_with_auto_diary_enabled_generates(self):
+        from unittest.mock import patch
+        from app.services.diary_scheduler_service import DiarySchedulerService
+
+        self._set_user_config(self.user_id, "auto_diary_enabled", "true")
+
+        with patch.object(DiarySchedulerService, "_current_hour_in_timezone", return_value=23):
+            with self.Session() as db:
+                svc = DiarySchedulerService(db)
+                generated = svc.scan_and_generate()
+                self.assertEqual(generated, 1)
+
+    def test_no_duplicate_generation(self):
+        from unittest.mock import patch
+        from app.services.diary_scheduler_service import DiarySchedulerService
+
+        self._set_user_config(self.user_id, "auto_diary_enabled", "true")
+
+        with patch.object(DiarySchedulerService, "_current_hour_in_timezone", return_value=23):
+            with self.Session() as db:
+                svc = DiarySchedulerService(db)
+                generated = svc.scan_and_generate()
+                self.assertEqual(generated, 1)
+
+            # Second run should skip because diary already exists
+            with self.Session() as db:
+                svc = DiarySchedulerService(db)
+                generated = svc.scan_and_generate()
+                self.assertEqual(generated, 0)
+
+    def test_wrong_hour_skips_generation(self):
+        from unittest.mock import patch
+        from app.services.diary_scheduler_service import DiarySchedulerService
+
+        self._set_user_config(self.user_id, "auto_diary_enabled", "true")
+
+        with patch.object(DiarySchedulerService, "_current_hour_in_timezone", return_value=8):
+            with self.Session() as db:
+                svc = DiarySchedulerService(db)
+                generated = svc.scan_and_generate()
+                self.assertEqual(generated, 0)
+
+    def test_cross_user_isolation(self):
+        from unittest.mock import patch
+        from app.services.diary_scheduler_service import DiarySchedulerService
+
+        self._set_user_config(self.user_id, "auto_diary_enabled", "true")
+
+        other_id = uuid.uuid4()
+        with self.Session() as db:
+            db.add(User(id=other_id, email="other2@t.com", hashed_password="x", display_name="O2"))
+            db.add(Conversation(user_id=other_id, title="Other Conv"))
+            db.commit()
+        self._set_user_config(other_id, "auto_diary_enabled", "false")
+
+        with patch.object(DiarySchedulerService, "_current_hour_in_timezone", return_value=23):
+            with self.Session() as db:
+                svc = DiarySchedulerService(db)
+                generated = svc.scan_and_generate()
+                # Only the first user should get a diary
+                self.assertEqual(generated, 1)

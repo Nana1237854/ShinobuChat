@@ -19,6 +19,9 @@ class UserConfigPatch(BaseModel):
     edge_tts_voice: str | None = None
     asr_engine: str | None = None
     whisper_api_key: str | None = None
+    diary_enabled: bool | None = None
+    auto_diary_enabled: bool | None = None
+    auto_diary_timezone: str | None = None
 
 
 class UserConfigFieldOut(BaseModel):
