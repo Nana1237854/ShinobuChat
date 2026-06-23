@@ -65,74 +65,18 @@ def create_app() -> FastAPI:
         _check_production_config()
         init_db()
 
-        if settings.reminder_background_enabled:
-            import asyncio
+        # Phase 3: JobScheduler replaces raw while loops
+        from app.services.jobs.job_registry import create_default_scheduler
 
-            from app.db.session import SessionLocal
-            from app.services.mode_service import ModeService
-            from app.services.reminder_scheduler_service import ReminderSchedulerService
+        scheduler = create_default_scheduler()
+        app.state.job_scheduler = scheduler
+        scheduler.start()
 
-            async def reminder_loop() -> None:
-                while True:
-                    try:
-                        await asyncio.sleep(settings.reminder_scan_interval_seconds)
-                        db = SessionLocal()
-                        try:
-                            mode_svc = ModeService(db)
-                            service = ReminderSchedulerService(db, mode_service=mode_svc)
-                            events = service.scan_due_reminders()
-                            if events:
-                                logger.info(
-                                    "Reminder scan produced %d events", len(events)
-                                )
-                        finally:
-                            db.close()
-                    except Exception:
-                        logger.exception("Reminder background scan failed")
-
-                    # Goal checkin scan
-                    try:
-                        db2 = SessionLocal()
-                        try:
-                            from app.services.goal_service import GoalService
-                            goal_svc = GoalService(db2)
-                            goal_events = goal_svc.scan_due_checkins()
-                            if goal_events:
-                                logger.info(
-                                    "Goal checkin scan produced %d events", len(goal_events)
-                                )
-                        finally:
-                            db2.close()
-                    except Exception:
-                        logger.exception("Goal checkin background scan failed")
-
-            import logging
-
-            logger = logging.getLogger("shinobu.reminder")
-            asyncio.create_task(reminder_loop())
-
-        if settings.diary_auto_generate_enabled:
-            import asyncio
-
-            from app.db.session import SessionLocal
-            from app.services.diary_scheduler_service import DiarySchedulerService
-
-            async def diary_loop() -> None:
-                while True:
-                    try:
-                        await asyncio.sleep(settings.diary_background_scan_interval_seconds)
-                        db = SessionLocal()
-                        try:
-                            service = DiarySchedulerService(db)
-                            generated = service.scan_and_generate()
-                            if generated:
-                                _startup_logger.info("Auto-diary generated for %d users", generated)
-                        finally:
-                            db.close()
-                    except Exception:
-                        _startup_logger.exception("Diary background scan failed")
-
-            asyncio.create_task(diary_loop())
+    @app.on_event("shutdown")
+    async def shutdown_event() -> None:
+        scheduler = getattr(app.state, "job_scheduler", None)
+        if scheduler:
+            await scheduler.stop()
 
     @app.get("/health", tags=["health"])
     async def health_check() -> dict[str, str]:

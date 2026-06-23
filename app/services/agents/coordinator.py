@@ -81,6 +81,22 @@ class AgentCoordinator:
         if mode_context:
             memory_context = [mode_context, *memory_context]
 
+        # ── Phase 3: BehaviorEngine unified decision ──
+        local_agent_settings = self._load_local_agent_settings(user_id)
+        behavior = self._behavior_decision(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            route_mode=requested_route_mode.value,
+            conversation_mode=conversation_mode,
+            content=content,
+            local_agent_settings=local_agent_settings,
+        )
+        if behavior.prompt_hints:
+            memory_context = [
+                "【当前行为策略】\n" + "\n".join(f"- {hint}" for hint in behavior.prompt_hints),
+                *memory_context,
+            ]
+
         # Group character context — inject after mode, before persona
         _char_names, character_context = self._conversation_characters_context(
             user_id, conversation_id
@@ -134,6 +150,10 @@ class AgentCoordinator:
                 messages, progress_events = self.task_agent.build_messages(
                     content, history, memory_context
                 )
+        # Phase 3: log skill activation
+        if user_skills:
+            self._record_skill_activation(user_id, conversation_id, content, user_skills)
+
         trace_context = {
             "memory_ids": [],
             "activated_skill_names": [s.name for s in (user_skills or [])],
@@ -328,6 +348,81 @@ class AgentCoordinator:
         ):
             return RouterDecision(RouteMode.AGENT, 0.93, "continue agent follow-up after assistant clarification")
         return None
+
+    # ── Phase 3: BehaviorEngine integration ──
+
+    @staticmethod
+    def _load_local_agent_settings(user_id: uuid.UUID) -> dict:
+        try:
+            from app.db.session import SessionLocal
+            from app.services.local_agent_settings_service import LocalAgentSettingsService
+
+            db = SessionLocal()
+            try:
+                return LocalAgentSettingsService(db).get_settings(user_id)
+            finally:
+                db.close()
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _behavior_decision(
+        *,
+        user_id: uuid.UUID,
+        conversation_id: uuid.UUID | None,
+        route_mode: str,
+        conversation_mode: str,
+        content: str,
+        local_agent_settings: dict,
+    ):
+        from app.services.behavior_engine import BehaviorEngine, BehaviorContext
+
+        return BehaviorEngine().decide(
+            BehaviorContext(
+                user_id=str(user_id),
+                conversation_id=str(conversation_id) if conversation_id else None,
+                route_mode=route_mode,
+                conversation_mode=conversation_mode,
+                local_agent_settings=local_agent_settings,
+            )
+        )
+
+    # ── Phase 3: Skill activation logging ──
+
+    @staticmethod
+    def _record_skill_activation(
+        user_id: uuid.UUID,
+        conversation_id: uuid.UUID | None,
+        user_text: str,
+        skills: list,
+    ) -> None:
+        if not skills:
+            return
+
+        import logging
+        _log_sk = logging.getLogger("shinobu.skill_log")
+
+        try:
+            from app.db.session import SessionLocal
+            from app.services.skill_run_log_service import SkillRunLogService
+
+            db = SessionLocal()
+            try:
+                svc = SkillRunLogService(db)
+                for skill in skills:
+                    svc.record(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        skill_name=skill.name,
+                        trigger_source="runtime_injection",
+                        matched=True,
+                        activated=True,
+                        input_text=user_text,
+                    )
+            finally:
+                db.close()
+        except Exception:
+            _log_sk.warning("Skill run log failed", exc_info=True)
 
     @staticmethod
     def _vision_context(vision_context: str) -> str:

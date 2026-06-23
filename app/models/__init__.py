@@ -1,6 +1,7 @@
 from app.db.session import Base
 from app.models.action_audit_log import ActionAuditLog
 from app.models.browser_action_log import BrowserActionLog
+from app.models.job_run_log import JobRunLog
 from app.models.character_profile import CharacterProfile, ConversationCharacter
 from app.models.conversation import Conversation
 from app.models.device import Device
@@ -12,6 +13,8 @@ from app.models.message import Message
 from app.models.pending_action import PendingAction
 from app.models.persona_settings import UserPersonaSettings
 from app.models.prompt_trace import PromptTrace
+from app.models.skill_run_log import SkillRunLog
+from app.models.task_run import TaskRun
 from app.models.trusted_download_source import TrustedDownloadSource
 from app.models.user import User
 from app.models.user_config import UserConfig
@@ -26,6 +29,7 @@ __all__ = [
     "Base",
     "BrowserActionLog",
     "CharacterProfile",
+    "JobRunLog",
     "ConversationCharacter",
     "Conversation",
     "Device",
@@ -36,6 +40,8 @@ __all__ = [
     "Message",
     "PendingAction",
     "PromptTrace",
+    "SkillRunLog",
+    "TaskRun",
     "Todo",
     "TrustedDownloadSource",
     "User",

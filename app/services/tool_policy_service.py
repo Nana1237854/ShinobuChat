@@ -73,12 +73,41 @@ class ToolPolicyService:
         *,
         conversation_mode: str = "companion",
         route_mode: str | None = None,
+        behavior_decision=None,  # Phase 3: BehaviorDecision | None
     ) -> ToolPolicyDecision:
         checked: dict = {
             "tool_name": tool_name,
             "conversation_mode": conversation_mode,
             "route_mode": route_mode or "",
         }
+
+        # Rule 0: BehaviorEngine override (Phase 3)
+        if behavior_decision is not None:
+            group = _classify_tool(tool_name)
+            allowed = set(behavior_decision.allowed_tool_groups)
+            blocked = set(behavior_decision.blocked_tool_groups)
+
+            if group in blocked:
+                return ToolPolicyDecision(
+                    False,
+                    f"Tool policy denied: '{tool_name}' (group={group}) blocked by BehaviorEngine",
+                    checked_fields={**checked, "rule": "behavior_engine_blocked", "tool_group": group},
+                )
+            if group not in allowed:
+                return ToolPolicyDecision(
+                    False,
+                    f"Tool policy denied: '{tool_name}' (group={group}) not allowed by BehaviorEngine",
+                    checked_fields={**checked, "rule": "behavior_engine_not_allowed", "tool_group": group,
+                                    "allowed_groups": sorted(allowed)},
+                )
+            # BehaviorEngine allowed — skip mode-specific rules
+            return ToolPolicyDecision(
+                True,
+                f"Tool policy allowed by BehaviorEngine: '{tool_name}' (group={group})",
+                checked_fields={**checked, "rule": "behavior_engine_allowed", "tool_group": group},
+            )
+
+        # ── Legacy mode logic below (when behavior_decision is None) ──
 
         # Rule 1: unconditionally denied tools
         if tool_name.lower() in _ALWAYS_DENIED:

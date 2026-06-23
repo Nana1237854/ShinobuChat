@@ -16,6 +16,7 @@ from app.services.ai_client import AIClient
 from app.services.browser.browser_action_log_service import BrowserActionLogService
 from app.services.browser.trusted_download_source_service import TrustedDownloadSourceService
 from app.services.browser_automation_service import BrowserAutomationService
+from app.services.capabilities.capability_policy_service import CapabilityPolicyService
 from app.services.config_service import ConfigService
 from app.services.download_service import DownloadService
 from app.services.local_agent_settings_service import LocalAgentSettingsService
@@ -31,6 +32,7 @@ class BrowserFacadeService:
         self.db = db
         self.config_service = config_service
         self.settings = LocalAgentSettingsService(db)
+        self._capability_policy = CapabilityPolicyService(db)
         self.logs = BrowserActionLogService(db)
         self.trusted = TrustedDownloadSourceService(db)
         self._audit = ActionAuditService(db)
@@ -38,7 +40,7 @@ class BrowserFacadeService:
     # ── Search ──
 
     def search(self, user_id: UUID, query: str, max_results: int = 5) -> dict:
-        self.settings.ensure_browser_reader_enabled(user_id)
+        self._capability_policy.ensure(user_id, "browser_reader")
 
         api_key = self.config_service.get_effective_value(user_id, "google_search_api_key") or ""
         cx = self.config_service.get_effective_value(user_id, "google_search_cx") or ""
@@ -76,7 +78,7 @@ class BrowserFacadeService:
     # ── Read ──
 
     def read(self, user_id: UUID, url: str, max_chars: int = 10000) -> dict:
-        self.settings.ensure_browser_reader_enabled(user_id)
+        self._capability_policy.ensure(user_id, "browser_reader")
 
         result = WebReaderService().read(url, user_id=user_id, max_chars=max_chars)
 
@@ -112,7 +114,7 @@ class BrowserFacadeService:
     # ── Summarize ──
 
     def summarize(self, user_id: UUID, url: str, question: str = "", max_chars: int = 10000) -> dict:
-        self.settings.ensure_browser_reader_enabled(user_id)
+        self._capability_policy.ensure(user_id, "browser_reader")
 
         runtime = self.config_service.resolve_runtime(user_id)
         result = WebSummarizerService(ai_client=AIClient()).summarize(
@@ -151,7 +153,7 @@ class BrowserFacadeService:
     # ── Open URL ──
 
     def open_url(self, user_id: UUID, url: str) -> dict:
-        self.settings.ensure_browser_reader_enabled(user_id)
+        self._capability_policy.ensure(user_id, "browser_reader")
 
         result = BrowserAutomationService().open_url(url, user_id=user_id)
 
@@ -183,7 +185,7 @@ class BrowserFacadeService:
     # ── Download candidates ──
 
     def extract_download_candidates(self, user_id: UUID, url: str) -> dict:
-        self.settings.ensure_browser_reader_enabled(user_id)
+        self._capability_policy.ensure(user_id, "browser_reader")
 
         result = DownloadService(self.db).extract_candidates(url, user_id=user_id)
 
@@ -215,7 +217,7 @@ class BrowserFacadeService:
     # ── Classify downloads ──
 
     def classify_downloads(self, user_id: UUID, candidates: list[dict]) -> dict:
-        self.settings.ensure_browser_reader_enabled(user_id)
+        self._capability_policy.ensure(user_id, "browser_reader")
 
         result = DownloadService(self.db).classify(candidates)
 
