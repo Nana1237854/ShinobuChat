@@ -27,6 +27,7 @@ class RoleplayService:
         context: ContextManager,
         tone: ToneSettings,
         extra: str = "",
+        mode_section: str = "",
     ) -> dict[str, str]:
         if not settings.effective_roleplay_api_key:
             return {
@@ -47,7 +48,7 @@ class RoleplayService:
             base_url=settings.roleplay_llm_base_url or settings.llm_base_url,
         )
         messages = [
-            {"role": "system", "content": context.roleplay_system_prompt(tone, extra)},
+            {"role": "system", "content": context.roleplay_system_prompt(tone, extra, mode_section)},
             *context.roleplay_slice(),
             {"role": "user", "content": user_message},
         ]

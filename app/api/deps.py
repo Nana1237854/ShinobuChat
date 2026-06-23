@@ -22,7 +22,11 @@ from app.services.conversation_service import ConversationService
 from app.services.device_registry_service import DeviceRegistryService
 from app.services.embedding_service import EmbeddingService
 from app.services.http_client import UrllibHttpClient
+from app.services.character_profile_service import CharacterProfileService
+from app.services.diary_service import DiaryService
+from app.services.live2d_interaction_service import Live2DInteractionService
 from app.services.live2d_service import Live2DService
+from app.services.mode_service import ModeService
 from app.services.memory_service import MemoryService
 from app.services.message_service import MessageService
 from app.services.skill_manager import SkillManager
@@ -189,7 +193,9 @@ def get_todo_service(db: Session = Depends(get_db)) -> TodoService:
 
 
 def get_reminder_service(db: Session = Depends(get_db)) -> ReminderSchedulerService:
-    return ReminderSchedulerService(db)
+    from app.services.mode_service import ModeService
+
+    return ReminderSchedulerService(db, mode_service=ModeService(db))
 
 
 def get_persona_service(db: Session = Depends(get_db)) -> PersonaSettingsService:
@@ -227,3 +233,19 @@ def get_message_service(db: Session = Depends(get_db)) -> MessageService:
         ConfigService(db),
         SkillManager(db),
     )
+
+
+def get_mode_service(db: Session = Depends(get_db)) -> ModeService:
+    return ModeService(db)
+
+
+def get_diary_service(db: Session = Depends(get_db)) -> DiaryService:
+    return DiaryService(db)
+
+
+def get_live2d_interaction_service(db: Session = Depends(get_db)) -> Live2DInteractionService:
+    return Live2DInteractionService(db)
+
+
+def get_character_profile_service(db: Session = Depends(get_db)) -> CharacterProfileService:
+    return CharacterProfileService(db)

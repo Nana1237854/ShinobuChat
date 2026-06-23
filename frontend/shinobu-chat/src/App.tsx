@@ -29,6 +29,7 @@ import { SettingsPage, type SettingsTab } from './settings/SettingsPage';
 import { ReminderBubble } from './reminders/ReminderBubble';
 import { getDueReminders, dismissReminder, snoozeReminder } from './api/reminders';
 import { getConversationMode } from './api/modes';
+import { ApiRequestError } from './api/http';
 import { analyzeImage } from './api/vision';
 import { listGoals } from './api/goals';
 import { subscribeReminderEvents } from './realtime/sseClient';
@@ -573,15 +574,18 @@ export default function App() {
         notify('图片分析完成');
       } catch (nextError) {
         URL.revokeObjectURL(imageUrl);
-        const message = nextError instanceof Error ? nextError.message : '图片分析失败';
+        const is501 = nextError instanceof ApiRequestError && nextError.status === 501;
+        const message = is501
+          ? '图片分析功能即将支持，敬请期待。'
+          : nextError instanceof Error ? nextError.message : '图片分析失败';
         setMessages(current =>
           current.map(item => {
-            if (item.id === userMsgId) return { ...item, status: 'failed' as const };
-            if (item.id === assistantMsgId) return { ...item, content: `图片分析失败：${message}`, status: 'failed' as const };
+            if (item.id === userMsgId) return { ...item, status: 'sent' as const };
+            if (item.id === assistantMsgId) return { ...item, content: message, status: 'sent' as const };
             return item;
           }),
         );
-        setStatus('图片分析失败');
+        setStatus(is501 ? '图片分析即将支持' : '图片分析失败');
       } finally {
         setStreaming(false);
       }
@@ -853,6 +857,7 @@ export default function App() {
 
       <section className="stage-zone" role="img" aria-label="Shinobu 的 Live2D 角色舞台，展示当前角色动作与表情">
         <Live2DStage
+          accessToken={session.accessToken}
           model={selectedModel}
           settings={petSettings}
           activeEmotion={activeEmotion}

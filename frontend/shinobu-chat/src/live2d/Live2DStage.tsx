@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Palette, SlidersHorizontal, UserRoundCog, X } from 'lucide-react';
 import type { AvatarTool, ConversationMode, Live2DHitArea, Live2DModelItem, PetSettings } from '../types';
+import { recordLive2DInteraction } from '../api/interactions';
 import { clamp } from './settings';
 import { LIP_SYNC_IDS } from './lipSync';
 
 type Live2DStageProps = {
+  accessToken?: string;
   model?: Live2DModelItem;
   settings: PetSettings;
   activeEmotion?: string | null;
@@ -133,6 +135,7 @@ async function createLive2DRuntime(container: HTMLDivElement, model: Live2DModel
 }
 
 export function Live2DStage({
+  accessToken,
   model,
   settings,
   activeEmotion,
@@ -231,6 +234,18 @@ export function Live2DStage({
     const x = clientX - stageRect.left;
     const y = clientY - stageRect.top;
 
+    // Fire-and-forget: record interaction event to backend (does not block UI)
+    if (accessToken && hitArea !== 'unknown') {
+      recordLive2DInteraction(accessToken, {
+        hit_area: hitArea,
+        x: (clientX - stageRect.left) / (stageRect.width || 1),
+        y: (clientY - stageRect.top) / (stageRect.height || 1),
+        timestamp: new Date().toISOString(),
+      }).catch(() => {
+        // Silently ignore recording failures — interaction UX is primary
+      });
+    }
+
     switch (hitArea) {
       case 'head': {
         emitBubble('嗯？', x, y);
@@ -265,7 +280,7 @@ export function Live2DStage({
       default:
         break;
     }
-  }, [emitBubble, model, clearTempEmotion, conversationMode]);
+  }, [emitBubble, model, clearTempEmotion, conversationMode, accessToken]);
 
   // ── Lifecycle ──
 

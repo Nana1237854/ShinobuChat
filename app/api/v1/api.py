@@ -5,11 +5,14 @@ from app.api.v1.routes import (
     characters,
     conversations,
     config,
+    diaries,
     emotion,
     goals,
+    interactions,
     live2d,
     memories,
     messages,
+    modes,
     persona,
     reminders,
     sync,
@@ -17,6 +20,7 @@ from app.api.v1.routes import (
     skills,
     todos,
     users,
+    vision,
     voice,
 )
 
@@ -38,3 +42,7 @@ api_router.include_router(sync.router)
 api_router.include_router(characters.router)
 api_router.include_router(live2d.router)
 api_router.include_router(voice.router)
+api_router.include_router(modes.router)
+api_router.include_router(vision.router)
+api_router.include_router(diaries.router)
+api_router.include_router(interactions.router)

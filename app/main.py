@@ -41,6 +41,7 @@ def create_app() -> FastAPI:
             import asyncio
 
             from app.db.session import SessionLocal
+            from app.services.mode_service import ModeService
             from app.services.reminder_scheduler_service import ReminderSchedulerService
 
             async def reminder_loop() -> None:
@@ -49,7 +50,8 @@ def create_app() -> FastAPI:
                         await asyncio.sleep(settings.reminder_scan_interval_seconds)
                         db = SessionLocal()
                         try:
-                            service = ReminderSchedulerService(db)
+                            mode_svc = ModeService(db)
+                            service = ReminderSchedulerService(db, mode_service=mode_svc)
                             events = service.scan_due_reminders()
                             if events:
                                 logger.info(

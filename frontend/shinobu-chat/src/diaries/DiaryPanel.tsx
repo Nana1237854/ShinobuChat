@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BookOpen, Calendar, ChevronLeft, ChevronRight, RefreshCw, Sparkles, X } from 'lucide-react';
 import { generateDiary, getDiaryByDate, listDiaries } from '../api/diaries';
+import { ApiRequestError } from '../api/http';
 import type { DiaryDetail, DiaryItem } from '../types';
 
 type PanelState = 'loading' | 'ready' | 'empty' | 'error';
@@ -206,7 +207,11 @@ export function DiaryPanel({ accessToken }: { accessToken: string }) {
       });
       setState('ready');
     } catch (e) {
-      setError(e instanceof Error ? e.message : '生成日记失败');
+      if (e instanceof ApiRequestError && e.status === 501) {
+        setError('日记生成功能即将支持，敬请期待。');
+      } else {
+        setError(e instanceof Error ? e.message : '生成日记失败');
+      }
     } finally {
       setGenerating(false);
     }
@@ -233,9 +238,10 @@ export function DiaryPanel({ accessToken }: { accessToken: string }) {
           className="settings-primary-button diary-generate-btn"
           onClick={handleGenerate}
           disabled={generating}
+          title="日记生成功能即将支持"
         >
           <Sparkles size={16} />
-          {generating ? '正在生成...' : '生成今日日记'}
+          {generating ? '正在生成...' : '即将支持'}
         </button>
       </header>
 
@@ -260,16 +266,7 @@ export function DiaryPanel({ accessToken }: { accessToken: string }) {
         <div className="diary-empty">
           <BookOpen size={40} />
           <h3>还没有日记</h3>
-          <p>让 Shinobu 为你生成今日回顾吧。</p>
-          <button
-            type="button"
-            className="settings-primary-button"
-            onClick={handleGenerate}
-            disabled={generating}
-          >
-            <Sparkles size={16} />
-            {generating ? '正在生成...' : '生成今日日记'}
-          </button>
+          <p>日记生成功能即将支持，敬请期待。</p>
         </div>
       ) : null}
 

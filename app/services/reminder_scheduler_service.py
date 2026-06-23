@@ -41,8 +41,18 @@ class ReminderEvent:
 
 
 class ReminderSchedulerService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, mode_service=None):
         self.db = db
+        self._mode_service = mode_service
+
+    def _get_user_mode(self, user_id: UUID) -> str:
+        if self._mode_service is None:
+            return "companion"
+        try:
+            mode = self._mode_service.get_mode(user_id)
+            return mode.value
+        except Exception:
+            return "companion"
 
     # ---- scanning ----
 
@@ -127,15 +137,19 @@ class ReminderSchedulerService:
         if kind is None:
             return None
 
+        # Mode-aware filtering
+        user_mode = self._get_user_mode(todo.user_id)
+        if user_mode in ("focus", "night") and kind == "due_soon":
+            return None  # Only urgent reminders in focus/night mode
+        if user_mode == "focus" and todo.priority and todo.priority < 2 and kind == "due_now":
+            return None  # In focus mode, only remind high-priority items
+
         # Debounce: skip if same kind already sent (unless snooze expired)
         if todo.last_reminder_kind == kind and todo.last_reminded_at is not None:
             return None
 
-        message = (
-            f"任务「{todo.title}」已到期，记得完成哦。"
-            if kind == "due_now"
-            else f"任务「{todo.title}」将在 {settings.reminder_due_soon_minutes} 分钟内到期。"
-        )
+        # Mode-aware message tone
+        message = self._build_reminder_message(todo.title, kind, user_mode)
         return ReminderEvent(
             todo_id=todo.id,
             user_id=todo.user_id,
@@ -144,6 +158,28 @@ class ReminderSchedulerService:
             due_at=todo.due_at,
             message=message,
             reminder_count=todo.reminder_count + 1,
+        )
+
+    def _build_reminder_message(self, title: str, kind: str, mode: str) -> str:
+        if mode == "work":
+            return (
+                f"任务「{title}」已到期，请尽快完成。"
+                if kind == "due_now"
+                else f"提示：「{title}」将在 {settings.reminder_due_soon_minutes} 分钟内到期，请安排时间。"
+            )
+        if mode == "focus":
+            return f"「{title}」到期。"
+        if mode == "night":
+            return (
+                f"{title} — 该休息了，明天再处理吧。"
+                if kind == "due_now"
+                else f"提醒：「{title}」快到期了。"
+            )
+        # companion / default
+        return (
+            f"任务「{title}」已到期，记得完成哦。"
+            if kind == "due_now"
+            else f"任务「{title}」将在 {settings.reminder_due_soon_minutes} 分钟内到期。"
         )
 
     # ---- snooze / dismiss ----
