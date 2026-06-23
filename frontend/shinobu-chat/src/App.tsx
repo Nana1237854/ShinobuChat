@@ -134,6 +134,7 @@ export default function App() {
   const [petFeedback, setPetFeedback] = useState<string | null>(null);
   const [galgameMode, setGalgameMode] = useState(false);
   const [spokenLines, setSpokenLines] = useState<string[]>([]);
+  const [pendingVisionContext, setPendingVisionContext] = useState<string | null>(null);
   const [goalPreview, setGoalPreview] = useState<GoalItem[]>([]);
   const [reminderQueue, setReminderQueue] = useState<ReminderEvent[]>([]);
   const [reminderAction, setReminderAction] = useState<'snooze' | 'dismiss' | null>(null);
@@ -502,6 +503,17 @@ export default function App() {
     }
   };
 
+  const buildVisionContext = (result: VisionAnalyzeResponse): string => {
+    const parts = ['【图片分析结果】'];
+    parts.push(`概要：${result.summary}`);
+    if (result.scene) parts.push(`场景：${result.scene}`);
+    if (result.objects.length > 0) parts.push(`识别到的物体：${result.objects.join('、')}`);
+    if (result.text_in_image) parts.push(`图中文字：${result.text_in_image}`);
+    parts.push(`来源：${result.provider}`);
+    if (result.fallback_used) parts.push('备用识别：true（结果可能不够详细）');
+    return parts.join('\n');
+  };
+
   const formatVisionResponse = (result: VisionAnalyzeResponse): string => {
     const lines: string[] = [];
     lines.push(result.summary);
@@ -521,6 +533,10 @@ export default function App() {
     if (confidence < 0.6) {
       lines.push('');
       lines.push('（识别置信度较低，吾可能看错了）');
+    }
+    if (result.fallback_used) {
+      lines.push('');
+      lines.push(`（通过 ${result.provider} 识别）`);
     }
     return lines.join('\n');
   };
@@ -570,14 +586,21 @@ export default function App() {
             return item;
           }),
         );
+        setPendingVisionContext(buildVisionContext(result));
         setStatus('Ready');
         notify('图片分析完成');
       } catch (nextError) {
         URL.revokeObjectURL(imageUrl);
+        setPendingVisionContext(null);
         const is501 = nextError instanceof ApiRequestError && nextError.status === 501;
-        const message = is501
-          ? '图片分析功能即将支持，敬请期待。'
-          : nextError instanceof Error ? nextError.message : '图片分析失败';
+        const is413 = nextError instanceof ApiRequestError && nextError.status === 413;
+        const message = is413
+          ? '图片过大，请压缩后重试。'
+          : is501
+            ? '图片分析功能即将支持，敬请期待。'
+            : nextError instanceof ApiRequestError && (nextError.status === 502 || nextError.status === 503)
+              ? '图片分析暂时不可用，请稍后重试。'
+              : nextError instanceof Error ? nextError.message : '图片分析失败';
         setMessages(current =>
           current.map(item => {
             if (item.id === userMsgId) return { ...item, status: 'sent' as const };
@@ -600,12 +623,16 @@ export default function App() {
     let streamConversationId = conversationId;
     let actualRouteMode = routeMode;
     try {
+      const visionCtx = pendingVisionContext;
+      if (visionCtx) setPendingVisionContext(null);
+
       await sendMessageStream({
         userId: session.userId,
         conversationId,
         content,
         routeMode,
         accessToken: session.accessToken,
+        visionContext: visionCtx,
         onEvent: event => {
           if (event.type === 'conversation') {
             streamConversationId = event.conversationId;

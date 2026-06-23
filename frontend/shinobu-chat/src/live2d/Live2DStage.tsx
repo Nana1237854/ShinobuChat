@@ -241,6 +241,8 @@ export function Live2DStage({
         x: (clientX - stageRect.left) / (stageRect.width || 1),
         y: (clientY - stageRect.top) / (stageRect.height || 1),
         timestamp: new Date().toISOString(),
+        interaction_type: 'click',
+        metadata: { model_id: model?.id },
       }).catch(() => {
         // Silently ignore recording failures — interaction UX is primary
       });
@@ -412,6 +414,18 @@ export function Live2DStage({
       const stageEl = stageRef.current;
       if (!stageEl) return;
       const rect = stageEl.getBoundingClientRect();
+      const hitArea = detectHitArea(event.clientX, event.clientY, rect);
+      // Record long_press interaction
+      if (accessToken && hitArea !== 'unknown') {
+        recordLive2DInteraction(accessToken, {
+          hit_area: hitArea,
+          x: (event.clientX - rect.left) / (rect.width || 1),
+          y: (event.clientY - rect.top) / (rect.height || 1),
+          timestamp: new Date().toISOString(),
+          interaction_type: 'long_press',
+          metadata: { model_id: model?.id },
+        }).catch(() => {});
+      }
       setContextMenu({
         x: event.clientX - rect.left,
         y: event.clientY - rect.top,
