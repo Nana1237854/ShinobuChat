@@ -47,6 +47,15 @@ const groups: ConfigGroup[] = [
     ],
   },
   {
+    title: '图片理解模型 / Vision Provider',
+    description: '当主聊天模型不支持图片输入（上方「支持图片输入」关闭）时，可在这里配置一个单独的多模态模型。该配置只用于图片理解，不影响聊天模型、工具编排和日记生成。如果留空，系统会尝试使用主 AI 配置；仍不可用时会使用 OCR 备用识别。',
+    fields: [
+      { key: 'ai_vision_model', label: '图片理解模型', description: '专用的多模态视觉模型名称，例如 gpt-4o-mini、qwen-vl-plus。这不是聊天模型，不会影响对话和工具编排。', kind: 'text' },
+      { key: 'ai_vision_base_url', label: '图片理解 API 地址', description: 'Vision Provider 的 OpenAI 兼容接口地址。留空回退使用主 API 地址。', kind: 'text' },
+      { key: 'ai_vision_api_key', label: '图片理解 API Key', description: '独立于主 AI API Key。只显示脱敏预览，保存后会重新从服务端拉取。留空回退使用主 AI API Key。', kind: 'secret' },
+    ],
+  },
+  {
     title: '角色扮演与决策',
     description: '区分对话表达和任务决策，避免所有能力共用同一组温度。',
     fields: [

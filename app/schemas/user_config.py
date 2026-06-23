@@ -10,6 +10,9 @@ class UserConfigPatch(BaseModel):
     ai_request_timeout_seconds: int | None = Field(default=None, ge=1, le=600)
     ai_supports_image_input: bool | None = None
     ai_lightweight_max_tokens: int | None = Field(default=None, ge=128, le=131072)
+    ai_vision_base_url: str | None = None
+    ai_vision_api_key: str | None = None
+    ai_vision_model: str | None = None
     roleplay_llm_model: str | None = None
     roleplay_llm_temperature: float | None = Field(default=None, ge=0, le=2)
     decision_llm_model: str | None = None

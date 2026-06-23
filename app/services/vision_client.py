@@ -122,6 +122,61 @@ class BaseVisionClient(Protocol):
     ) -> VisionAnalyzeResult: ...
 
 
+def _resolve_vision_runtime_config(runtime_config: dict | None) -> dict:
+    """Resolve which provider configuration to use for vision analysis.
+
+    Returns a dict with ``base_url``, ``api_key``, ``model``, ``source`` (``"main"``
+    or ``"vision"``), and ``timeout``.
+
+    Raises ConfigurationError when no usable vision provider is available.
+    """
+    cfg = runtime_config or {}
+
+    main_base_url = cfg.get("ai_base_url") or settings.ai_base_url
+    main_api_key = cfg.get("ai_api_key") or settings.ai_api_key
+    main_model = cfg.get("ai_model") or settings.ai_model
+    supports_image = cfg.get("ai_supports_image_input", settings.ai_supports_image_input)
+
+    vision_base_url = cfg.get("ai_vision_base_url") or settings.ai_vision_base_url or main_base_url
+    vision_api_key = cfg.get("ai_vision_api_key") or settings.ai_vision_api_key or main_api_key
+    vision_model = cfg.get("ai_vision_model") or settings.ai_vision_model
+
+    timeout = int(cfg.get("ai_request_timeout_seconds", settings.ai_request_timeout_seconds))
+
+    # Case 1: main model declares image support
+    if supports_image:
+        if not main_api_key:
+            raise ConfigurationError("No AI API key configured for vision analysis")
+        return {
+            "base_url": main_base_url,
+            "api_key": main_api_key,
+            "model": main_model,
+            "source": "main",
+            "timeout": timeout,
+        }
+
+    # Case 2: dedicated vision model configured
+    if vision_model:
+        if not vision_api_key:
+            raise ConfigurationError(
+                "Vision model is configured but no API key is available. "
+                "Set ai_vision_api_key or ai_api_key."
+            )
+        return {
+            "base_url": vision_base_url,
+            "api_key": vision_api_key,
+            "model": vision_model,
+            "source": "vision",
+            "timeout": timeout,
+        }
+
+    # Case 3: no vision capability — let ConfigurableVisionClient fall back to OCR
+    raise ConfigurationError(
+        "Current AI model does not support image input and no vision model is configured. "
+        "Set ai_vision_model to use a dedicated vision provider."
+    )
+
+
 class OpenAIVisionClient:
     def __init__(self, http_client: UrllibHttpClient | None = None):
         self._http = http_client or UrllibHttpClient()
@@ -134,17 +189,11 @@ class OpenAIVisionClient:
         user_id: uuid.UUID | None = None,
         runtime_config: dict | None = None,
     ) -> VisionAnalyzeResult:
-        cfg = runtime_config or {}
-        api_key = cfg.get("ai_api_key") or settings.ai_api_key
-        base_url = cfg.get("ai_base_url") or settings.ai_base_url
-        model = cfg.get("ai_model") or settings.ai_model
-        supports_image = cfg.get("ai_supports_image_input", settings.ai_supports_image_input)
-        timeout = int(cfg.get("ai_request_timeout_seconds", settings.ai_request_timeout_seconds))
-
-        if not api_key:
-            raise ConfigurationError("No AI API key configured for vision analysis")
-        if not supports_image:
-            raise ConfigurationError("Current AI model does not support image input")
+        resolved = _resolve_vision_runtime_config(runtime_config)
+        api_key = resolved["api_key"]
+        base_url = resolved["base_url"]
+        model = resolved["model"]
+        timeout = resolved["timeout"]
 
         image_b64 = base64.b64encode(image_bytes).decode("ascii")
         data_uri = f"data:{mime_type};base64,{image_b64}"

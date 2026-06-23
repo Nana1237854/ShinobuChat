@@ -15,6 +15,7 @@ from app.services.vision_client import (
     _coerce_str,
     _coerce_str_list,
     _extract_json_object,
+    _resolve_vision_runtime_config,
 )
 
 
@@ -358,3 +359,265 @@ class ImageUnderstandingServiceTests(unittest.TestCase):
         self.assertIn("A cat on a couch", ctx)
         self.assertIn("cat, couch", ctx)
         self.assertIn("openai", ctx)
+
+
+class ResolveVisionRuntimeConfigTests(unittest.TestCase):
+    """Unit tests for _resolve_vision_runtime_config helper."""
+
+    def test_supports_image_true_uses_main_model(self):
+        resolved = _resolve_vision_runtime_config({
+            "ai_api_key": "sk-main",
+            "ai_base_url": "https://main.example.com/v1",
+            "ai_model": "main-model",
+            "ai_supports_image_input": True,
+            "ai_vision_api_key": "sk-vision",
+            "ai_vision_base_url": "https://vision.example.com/v1",
+            "ai_vision_model": "vision-model",
+        })
+        self.assertEqual(resolved["model"], "main-model")
+        self.assertEqual(resolved["base_url"], "https://main.example.com/v1")
+        self.assertEqual(resolved["api_key"], "sk-main")
+        self.assertEqual(resolved["source"], "main")
+
+    def test_supports_image_false_uses_vision_model(self):
+        resolved = _resolve_vision_runtime_config({
+            "ai_api_key": "sk-main",
+            "ai_base_url": "https://main.example.com/v1",
+            "ai_model": "text-model",
+            "ai_supports_image_input": False,
+            "ai_vision_api_key": "sk-vision",
+            "ai_vision_base_url": "https://vision.example.com/v1",
+            "ai_vision_model": "gpt-4o",
+        })
+        self.assertEqual(resolved["model"], "gpt-4o")
+        self.assertEqual(resolved["base_url"], "https://vision.example.com/v1")
+        self.assertEqual(resolved["api_key"], "sk-vision")
+        self.assertEqual(resolved["source"], "vision")
+
+    def test_vision_base_url_falls_back_to_main(self):
+        resolved = _resolve_vision_runtime_config({
+            "ai_api_key": "sk-main",
+            "ai_base_url": "https://main.example.com/v1",
+            "ai_model": "text-model",
+            "ai_supports_image_input": False,
+            "ai_vision_api_key": "sk-vision",
+            "ai_vision_base_url": "",
+            "ai_vision_model": "gpt-4o",
+        })
+        self.assertEqual(resolved["base_url"], "https://main.example.com/v1")
+        self.assertEqual(resolved["source"], "vision")
+
+    def test_vision_api_key_falls_back_to_main(self):
+        resolved = _resolve_vision_runtime_config({
+            "ai_api_key": "sk-main",
+            "ai_base_url": "https://main.example.com/v1",
+            "ai_model": "text-model",
+            "ai_supports_image_input": False,
+            "ai_vision_api_key": "",
+            "ai_vision_base_url": "https://vision.example.com/v1",
+            "ai_vision_model": "gpt-4o",
+        })
+        self.assertEqual(resolved["api_key"], "sk-main")
+        self.assertEqual(resolved["source"], "vision")
+
+    def test_supports_image_false_no_vision_model_raises(self):
+        with self.assertRaises(ConfigurationError) as ctx:
+            _resolve_vision_runtime_config({
+                "ai_api_key": "sk-main",
+                "ai_base_url": "https://main.example.com/v1",
+                "ai_model": "text-model",
+                "ai_supports_image_input": False,
+                "ai_vision_model": "",
+            })
+        self.assertIn("no vision model is configured", str(ctx.exception.detail))
+
+    def test_supports_image_false_vision_model_set_no_api_key_raises(self):
+        with patch("app.services.vision_client.settings.ai_api_key", ""):
+            with patch("app.services.vision_client.settings.ai_vision_api_key", ""):
+                with self.assertRaises(ConfigurationError) as ctx:
+                    _resolve_vision_runtime_config({
+                        "ai_api_key": "",
+                        "ai_base_url": "https://main.example.com/v1",
+                        "ai_model": "text-model",
+                        "ai_supports_image_input": False,
+                        "ai_vision_api_key": "",
+                        "ai_vision_model": "gpt-4o",
+                    })
+                self.assertIn("no API key is available", str(ctx.exception.detail))
+
+    def test_supports_image_true_no_api_key_raises(self):
+        with patch("app.services.vision_client.settings.ai_api_key", ""):
+            with self.assertRaises(ConfigurationError) as ctx:
+                _resolve_vision_runtime_config({
+                    "ai_api_key": "",
+                    "ai_supports_image_input": True,
+                })
+            self.assertIn("No AI API key", str(ctx.exception.detail))
+
+
+class VisionProviderHttpAssertionTests(unittest.TestCase):
+    """Assert HTTP request details match resolved vision provider config."""
+
+    def test_main_model_request_uses_main_config(self):
+        fake_response = {
+            "choices": [{
+                "message": {
+                    "content": '{"summary":"test","objects":[],"confidence":0.8}'
+                }
+            }]
+        }
+        mock_http = MagicMock()
+        mock_http.request_json.return_value = fake_response
+        client = OpenAIVisionClient(mock_http)
+
+        import asyncio
+        asyncio.run(
+            client.analyze(
+                _make_jpeg_bytes(), "image/jpeg",
+                runtime_config={
+                    "ai_api_key": "sk-main-key",
+                    "ai_base_url": "https://main.example.com/v1",
+                    "ai_model": "main-gpt",
+                    "ai_supports_image_input": True,
+                },
+            )
+        )
+
+        call_args = mock_http.request_json.call_args
+        url = call_args[0][0]
+        body = call_args[1]["body"]
+        headers = call_args[1]["headers"]
+
+        self.assertTrue(url.startswith("https://main.example.com/v1"))
+        self.assertIn("/chat/completions", url)
+        self.assertEqual(body["model"], "main-gpt")
+        self.assertEqual(headers["Authorization"], "Bearer sk-main-key")
+
+    def test_vision_model_request_uses_vision_config(self):
+        fake_response = {
+            "choices": [{
+                "message": {
+                    "content": '{"summary":"test","objects":[],"confidence":0.8}'
+                }
+            }]
+        }
+        mock_http = MagicMock()
+        mock_http.request_json.return_value = fake_response
+        client = OpenAIVisionClient(mock_http)
+
+        import asyncio
+        asyncio.run(
+            client.analyze(
+                _make_jpeg_bytes(), "image/jpeg",
+                runtime_config={
+                    "ai_api_key": "sk-main-key",
+                    "ai_base_url": "https://main.example.com/v1",
+                    "ai_model": "text-model",
+                    "ai_supports_image_input": False,
+                    "ai_vision_api_key": "sk-vision-key",
+                    "ai_vision_base_url": "https://vision.example.com/v1",
+                    "ai_vision_model": "gpt-4o",
+                },
+            )
+        )
+
+        call_args = mock_http.request_json.call_args
+        url = call_args[0][0]
+        body = call_args[1]["body"]
+        headers = call_args[1]["headers"]
+
+        self.assertTrue(url.startswith("https://vision.example.com/v1"))
+        self.assertEqual(body["model"], "gpt-4o")
+        self.assertEqual(headers["Authorization"], "Bearer sk-vision-key")
+
+
+class ConfigurableVisionClientVisionModelTests(unittest.TestCase):
+    """ConfigurableVisionClient integration with dedicated vision model."""
+
+    def test_vision_model_success_no_fallback(self):
+        fake_response = {
+            "choices": [{
+                "message": {
+                    "content": '{"summary":"vision model result","objects":[],"confidence":0.9}'
+                }
+            }]
+        }
+        mock_http = MagicMock()
+        mock_http.request_json.return_value = fake_response
+        from app.services.vision_client import ConfigurableVisionClient
+
+        client = ConfigurableVisionClient(mock_http)
+        import asyncio
+        result = asyncio.run(
+            client.analyze(
+                _make_jpeg_bytes(), "image/jpeg",
+                runtime_config={
+                    "ai_api_key": "sk-main",
+                    "ai_base_url": "https://main.example.com/v1",
+                    "ai_model": "text-model",
+                    "ai_supports_image_input": False,
+                    "ai_vision_api_key": "sk-vision",
+                    "ai_vision_base_url": "https://vision.example.com/v1",
+                    "ai_vision_model": "gpt-4o",
+                },
+            )
+        )
+        self.assertEqual(result.provider, "openai")
+        self.assertFalse(result.fallback_used)
+        self.assertEqual(result.summary, "vision model result")
+
+    def test_vision_model_fails_fallback_to_ocr(self):
+        import asyncio
+        from app.services.vision_client import ConfigurableVisionClient
+
+        mock_http = MagicMock()
+        mock_http.request_json.side_effect = UpstreamServiceError("Vision API error")
+        client = ConfigurableVisionClient(mock_http)
+
+        fake_reader = MagicMock()
+        fake_reader.readtext.return_value = [(None, "Fallback OCR", None)]
+        with patch.object(OCRVisionClient, "_ensure_reader", return_value=fake_reader):
+            result = asyncio.run(
+                client.analyze(
+                    _make_jpeg_bytes(), "image/jpeg",
+                    runtime_config={
+                        "ai_api_key": "sk-main",
+                        "ai_base_url": "https://main.example.com/v1",
+                        "ai_model": "text-model",
+                        "ai_supports_image_input": False,
+                        "ai_vision_api_key": "sk-vision",
+                        "ai_vision_model": "gpt-4o",
+                    },
+                )
+            )
+        self.assertEqual(result.provider, "ocr")
+        self.assertTrue(result.fallback_used)
+        self.assertEqual(result.detected_text, "Fallback OCR")
+
+    def test_no_vision_model_or_support_falls_back_to_ocr(self):
+        """When ai_supports_image_input=False and no ai_vision_model, go straight to OCR."""
+        import asyncio
+        from app.services.vision_client import ConfigurableVisionClient
+
+        mock_http = MagicMock()
+        client = ConfigurableVisionClient(mock_http)
+
+        fake_reader = MagicMock()
+        fake_reader.readtext.return_value = [(None, "OCR only", None)]
+        with patch.object(OCRVisionClient, "_ensure_reader", return_value=fake_reader):
+            result = asyncio.run(
+                client.analyze(
+                    _make_jpeg_bytes(), "image/jpeg",
+                    runtime_config={
+                        "ai_api_key": "sk-main",
+                        "ai_base_url": "https://main.example.com/v1",
+                        "ai_model": "text-model",
+                        "ai_supports_image_input": False,
+                    },
+                )
+            )
+        self.assertEqual(result.provider, "ocr")
+        self.assertTrue(result.fallback_used)
+        # HTTP client should never have been called since OpenAIVisionClient
+        # raises ConfigurationError immediately
+        mock_http.request_json.assert_not_called()

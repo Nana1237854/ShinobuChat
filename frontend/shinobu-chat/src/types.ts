@@ -155,6 +155,9 @@ export type ConfigUpdateRequest = Partial<{
   ai_request_timeout_seconds: number | null;
   ai_supports_image_input: boolean | null;
   ai_lightweight_max_tokens: number | null;
+  ai_vision_base_url: string | null;
+  ai_vision_api_key: string | null;
+  ai_vision_model: string | null;
   roleplay_llm_model: string | null;
   roleplay_llm_temperature: number | null;
   decision_llm_model: string | null;

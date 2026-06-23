@@ -512,8 +512,8 @@ export default function App() {
     if (result.scene) parts.push(`场景：${result.scene}`);
     if (result.objects.length > 0) parts.push(`识别到的物体：${result.objects.join('、')}`);
     if (result.text_in_image) parts.push(`图中文字：${result.text_in_image}`);
-    parts.push(`来源：${result.provider}`);
-    if (result.fallback_used) parts.push('备用识别：true（结果可能不够详细）');
+    parts.push(`提供者: ${result.provider}`);
+    if (result.fallback_used) parts.push('备用识别: true（OCR 文字识别结果可能不完整）');
     return parts.join('\n');
   };
 
@@ -539,7 +539,7 @@ export default function App() {
     }
     if (result.fallback_used) {
       lines.push('');
-      lines.push(`（通过 ${result.provider} 识别）`);
+      lines.push(`（OCR 备用识别，结果可能不完整）`);
     }
     return lines.join('\n');
   };
@@ -595,7 +595,7 @@ export default function App() {
       try {
         const result = await analyzeImage(session.accessToken, imageFile, question || null);
         URL.revokeObjectURL(imageUrl);
-        const providerLabel = result.provider === 'openai' ? 'OpenAI Vision' : result.provider === 'ocr' ? 'OCR (文字识别)' : result.provider;
+        const providerLabel = result.provider === 'openai' ? 'AI 图片理解' : result.provider === 'ocr' ? 'OCR 备用识别，结果可能不完整' : result.provider;
         const badgeHtml = result.fallback_used
           ? `${providerLabel} · 已降级`
           : providerLabel;
@@ -621,7 +621,15 @@ export default function App() {
         setPendingVisionContext(null);
         let message: string;
         if (nextError instanceof ApiRequestError) {
-          message = getErrorMessage(nextError.status, nextError.message);
+          if (nextError.status === 413) {
+            message = '图片过大，请压缩后重试。';
+          } else if (nextError.status === 400) {
+            message = '无法识别图片格式，请检查文件是否完整。';
+          } else if (nextError.status === 502 || nextError.status === 503) {
+            message = '图片理解服务暂时不可用，已尝试 OCR 备用识别，请稍后重试。';
+          } else {
+            message = getErrorMessage(nextError.status, nextError.message);
+          }
         } else {
           message = nextError instanceof Error ? nextError.message : '图片分析失败';
         }

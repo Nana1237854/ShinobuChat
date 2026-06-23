@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     ai_extra_body: str = Field(default="")
     ai_lightweight_max_tokens: int = Field(default=4096)
 
+    ai_vision_base_url: str = Field(default="")
+    ai_vision_api_key: str = Field(default="")
+    ai_vision_model: str = Field(default="")
+
     agent_max_steps: int = Field(default=50)
 
     diary_enabled: bool = Field(default=True)

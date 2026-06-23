@@ -31,6 +31,9 @@ CONFIG_SPECS: dict[str, ConfigSpec] = {
     "ai_request_timeout_seconds": ConfigSpec(int),
     "ai_supports_image_input": ConfigSpec(bool),
     "ai_lightweight_max_tokens": ConfigSpec(int),
+    "ai_vision_base_url": ConfigSpec(str),
+    "ai_vision_api_key": ConfigSpec(str, True),
+    "ai_vision_model": ConfigSpec(str),
     "roleplay_llm_model": ConfigSpec(str),
     "roleplay_llm_temperature": ConfigSpec(float),
     "decision_llm_model": ConfigSpec(str),
@@ -179,7 +182,7 @@ class ConfigService:
         if not configured:
             logger.warning(
                 "SC_CONFIG_ENCRYPTION_KEY is not set. "
-                "Encrypted config fields (ai_api_key, google_search_api_key, whisper_api_key) "
+                "Encrypted config fields (ai_api_key, ai_vision_api_key, google_search_api_key, whisper_api_key) "
                 "cannot be saved until a key is configured. "
                 "Set SC_CONFIG_ENCRYPTION_KEY in .env for production use."
             )
