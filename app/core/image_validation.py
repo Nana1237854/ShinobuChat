@@ -6,14 +6,17 @@ from app.core.exceptions import BadRequestError
 
 logger = logging.getLogger(__name__)
 
-ALLOWED_MIME_TYPES = {
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "image/webp",
-    "image/bmp",
-    "image/tiff",
+# Map Pillow format names to MIME types for whitelist validation
+_FORMAT_TO_MIME: dict[str, str] = {
+    "JPEG": "image/jpeg",
+    "PNG": "image/png",
+    "GIF": "image/gif",
+    "WEBP": "image/webp",
+    "BMP": "image/bmp",
+    "TIFF": "image/tiff",
 }
+
+ALLOWED_FORMATS: set[str] = set(_FORMAT_TO_MIME.keys())
 
 
 def validate_image_bytes(
@@ -21,6 +24,7 @@ def validate_image_bytes(
     max_bytes: int | None = None,
     max_side: int | None = None,
     max_pixels: int | None = None,
+    max_output_bytes: int | None = None,
 ) -> tuple[bytes, str]:
     """Validate raw image bytes and return (sanitized_bytes, mime_type).
 
@@ -33,6 +37,8 @@ def validate_image_bytes(
         max_side = settings.image_max_side
     if max_pixels is None:
         max_pixels = settings.image_max_pixels
+    if max_output_bytes is None:
+        max_output_bytes = settings.image_max_output_bytes
 
     if not data:
         raise BadRequestError("Image file is empty")
@@ -49,6 +55,14 @@ def validate_image_bytes(
         img.load()
     except Exception:
         raise BadRequestError("Unrecognized image format")
+
+    # Validate format against whitelist
+    fmt = getattr(img, "format", None)
+    if fmt is None or fmt.upper() not in ALLOWED_FORMATS:
+        raise BadRequestError(
+            f"Unsupported image format: {fmt or 'unknown'}. "
+            f"Allowed: {', '.join(sorted(ALLOWED_FORMATS))}"
+        )
 
     # Validate dimensions
     w, h = img.size
@@ -81,4 +95,12 @@ def validate_image_bytes(
 
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=90)
-    return buf.getvalue(), "image/jpeg"
+    output = buf.getvalue()
+
+    if len(output) > max_output_bytes:
+        raise BadRequestError(
+            f"Re-encoded image too large: {len(output)} bytes exceeds "
+            f"{max_output_bytes} bytes output limit"
+        )
+
+    return output, "image/jpeg"

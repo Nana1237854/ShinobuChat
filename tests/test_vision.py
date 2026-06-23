@@ -10,6 +10,10 @@ from app.services.vision_client import (
     OCRVisionClient,
     OpenAIVisionClient,
     VisionAnalyzeResult,
+    _coerce_float,
+    _coerce_optional_str,
+    _coerce_str,
+    _coerce_str_list,
     _extract_json_object,
 )
 
@@ -56,6 +60,14 @@ class ImageValidationTests(unittest.TestCase):
         self.assertIsInstance(validated, bytes)
         self.assertTrue(len(validated) > 0)
         self.assertEqual(mime, "image/jpeg")
+
+    def test_output_too_large_raises(self):
+        # Create a JPEG that will re-encode larger than the output limit
+        data = _make_jpeg_bytes(100, 100)
+        with self.assertRaises(BadRequestError) as ctx:
+            validate_image_bytes(data, max_bytes=1024 * 1024, max_side=200,
+                                 max_pixels=50000, max_output_bytes=10)
+        self.assertIn("output", str(ctx.exception.detail).lower())
 
 
 class ExtractJsonObjectTests(unittest.TestCase):
@@ -172,6 +184,30 @@ class OpenAIVisionClientTests(unittest.TestCase):
         self.assertEqual(result.provider, "openai")
 
 
+class TypeCoercionTests(unittest.TestCase):
+    def test_coerce_str(self):
+        self.assertEqual(_coerce_str("hello"), "hello")
+        self.assertEqual(_coerce_str(123), "123")
+        self.assertEqual(_coerce_str(None), "")
+
+    def test_coerce_str_list(self):
+        self.assertEqual(_coerce_str_list(["a", "b"]), ["a", "b"])
+        self.assertEqual(_coerce_str_list("single"), ["single"])
+        self.assertEqual(_coerce_str_list(42), [])
+
+    def test_coerce_float(self):
+        self.assertEqual(_coerce_float(0.8), 0.8)
+        self.assertEqual(_coerce_float("0.6"), 0.6)
+        self.assertEqual(_coerce_float("bad", 0.7), 0.7)
+        self.assertEqual(_coerce_float(1.5), 1.0)  # clamped
+
+    def test_coerce_optional_str(self):
+        self.assertIsNone(_coerce_optional_str(None))
+        self.assertIsNone(_coerce_optional_str("null"))
+        self.assertIsNone(_coerce_optional_str("None"))
+        self.assertEqual(_coerce_optional_str("kitchen"), "kitchen")
+
+
 class OCRVisionClientTests(unittest.TestCase):
     def test_returns_ocr_provider(self):
         fake_reader = MagicMock()
@@ -188,6 +224,29 @@ class OCRVisionClientTests(unittest.TestCase):
         self.assertTrue(result.fallback_used)
         self.assertEqual(result.detected_text, "Hello\nWorld")
         self.assertIn("已从图片中提取到文字", result.summary)
+
+    def test_ocr_cannot_open_image_raises(self):
+        """OCR failure to open image must raise UpstreamServiceError, not 200."""
+        fake_reader = MagicMock()
+        with patch.object(OCRVisionClient, "_ensure_reader", return_value=fake_reader):
+            import asyncio
+            with self.assertRaises(UpstreamServiceError) as ctx:
+                asyncio.run(
+                    OCRVisionClient().analyze(b"not an image", "image/jpeg")
+                )
+            self.assertIn("OCR failed", str(ctx.exception.detail))
+
+    def test_ocr_readtext_exception_raises(self):
+        """OCR readtext failure must raise UpstreamServiceError, not 200."""
+        fake_reader = MagicMock()
+        fake_reader.readtext.side_effect = RuntimeError("GPU crash")
+        with patch.object(OCRVisionClient, "_ensure_reader", return_value=fake_reader):
+            import asyncio
+            with self.assertRaises(UpstreamServiceError) as ctx:
+                asyncio.run(
+                    OCRVisionClient().analyze(_make_jpeg_bytes(), "image/jpeg")
+                )
+            self.assertIn("readtext failed", str(ctx.exception.detail))
 
 
 class ConfigurableVisionClientTests(unittest.TestCase):

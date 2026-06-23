@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -39,11 +40,9 @@ def _extract_json_object(text: str) -> dict:
     Handles: ```json fences, leading text, trailing text.
     Falls back to returning raw text as summary if JSON parsing fails.
     """
-    # Strip code fences
     cleaned = re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.MULTILINE)
     cleaned = re.sub(r"\s*```$", "", cleaned, flags=re.MULTILINE)
 
-    # Find JSON object boundaries
     start = cleaned.find("{")
     end = cleaned.rfind("}")
     if start != -1 and end != -1 and end > start:
@@ -52,13 +51,11 @@ def _extract_json_object(text: str) -> dict:
         except json.JSONDecodeError:
             pass
 
-    # Try full text as JSON
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         pass
 
-    # Fallback: use raw text as summary
     return {
         "summary": cleaned[:500] or text[:500],
         "objects": [],
@@ -67,6 +64,38 @@ def _extract_json_object(text: str) -> dict:
         "suggestions": [],
         "confidence": 0.3,
     }
+
+
+def _coerce_str(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    return str(value) if value else ""
+
+
+def _coerce_str_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [_coerce_str(v) for v in value if v is not None]
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    return []
+
+
+def _coerce_float(value: object, default: float = 0.5) -> float:
+    if isinstance(value, (int, float)):
+        return max(0.0, min(1.0, float(value)))
+    if isinstance(value, str):
+        try:
+            return max(0.0, min(1.0, float(value)))
+        except (ValueError, TypeError):
+            return default
+    return default
+
+
+def _coerce_optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s if s and s.lower() != "null" and s.lower() != "none" else None
 
 
 @dataclass(frozen=True)
@@ -144,12 +173,14 @@ class OpenAIVisionClient:
 
         url = f"{base_url.rstrip('/')}/chat/completions"
 
-        try:
-            raw = self._http.request_json(
+        # Sync HTTP via to_thread — UrllibHttpClient blocks
+        loop = asyncio.get_running_loop()
+        raw = await loop.run_in_executor(
+            None,
+            lambda: self._http.request_json(
                 url, method="POST", headers=headers, body=body, timeout=timeout
-            )
-        except Exception as exc:
-            raise UpstreamServiceError(f"Vision API request failed: {exc}")
+            ),
+        )
 
         try:
             content = raw["choices"][0]["message"]["content"]
@@ -157,14 +188,13 @@ class OpenAIVisionClient:
             raise UpstreamServiceError(f"Unexpected vision API response structure: {exc}")
 
         parsed = _extract_json_object(content)
-
         return VisionAnalyzeResult(
-            summary=parsed.get("summary", "") or content[:200],
-            objects=parsed.get("objects") or [],
-            scene=parsed.get("scene"),
-            detected_text=parsed.get("text_in_image"),
-            suggestions=parsed.get("suggestions") or [],
-            confidence=float(parsed.get("confidence", 0.7)),
+            summary=_coerce_str(parsed.get("summary")) or content[:200],
+            objects=_coerce_str_list(parsed.get("objects")),
+            scene=_coerce_optional_str(parsed.get("scene")),
+            detected_text=_coerce_optional_str(parsed.get("text_in_image")),
+            suggestions=_coerce_str_list(parsed.get("suggestions")),
+            confidence=_coerce_float(parsed.get("confidence"), 0.7),
             provider="openai",
             fallback_used=False,
         )
@@ -201,38 +231,16 @@ class OCRVisionClient:
         except ConfigurationError:
             raise
 
-        import io
-
+        # Run sync OCR in thread — easyocr.Reader.readtext blocks
+        loop = asyncio.get_running_loop()
         try:
-            from PIL import Image
-
-            img = Image.open(io.BytesIO(image_bytes))
-            img.load()
-        except Exception:
-            return VisionAnalyzeResult(
-                summary="无法解析图片格式。",
-                objects=[],
-                scene=None,
-                detected_text=None,
-                suggestions=[],
-                confidence=0.0,
-                provider="ocr",
-                fallback_used=True,
+            results = await loop.run_in_executor(
+                None, self._run_ocr, image_bytes, reader
             )
-
-        try:
-            results = reader.readtext(img)
-        except Exception:
-            return VisionAnalyzeResult(
-                summary="OCR 处理失败，无法提取文字。",
-                objects=[],
-                scene=None,
-                detected_text=None,
-                suggestions=[],
-                confidence=0.0,
-                provider="ocr",
-                fallback_used=True,
-            )
+        except UpstreamServiceError:
+            raise
+        except Exception as exc:
+            raise UpstreamServiceError(f"OCR processing failed: {exc}")
 
         if not results:
             return VisionAnalyzeResult(
@@ -258,6 +266,26 @@ class OCRVisionClient:
             fallback_used=True,
         )
 
+    def _run_ocr(self, image_bytes: bytes, reader):
+        """Synchronous OCR processing — runs in executor thread."""
+        import io
+
+        try:
+            from PIL import Image
+        except ModuleNotFoundError:
+            raise UpstreamServiceError("OCR failed: Pillow is not installed")
+
+        try:
+            img = Image.open(io.BytesIO(image_bytes))
+            img.load()
+        except Exception as exc:
+            raise UpstreamServiceError(f"OCR failed to open image: {exc}")
+
+        try:
+            return reader.readtext(img)
+        except Exception as exc:
+            raise UpstreamServiceError(f"OCR readtext failed: {exc}")
+
 
 class ConfigurableVisionClient:
     def __init__(self, http_client: UrllibHttpClient | None = None):
@@ -273,7 +301,7 @@ class ConfigurableVisionClient:
     ) -> VisionAnalyzeResult:
         errors: list[str] = []
 
-        # 1. Try OpenAI-compatible vision API
+        # 1. Try OpenAI vision API
         try:
             openai_client = OpenAIVisionClient(self._http)
             result = await openai_client.analyze(
@@ -290,7 +318,7 @@ class ConfigurableVisionClient:
                 image_bytes, mime_type, question, user_id, runtime_config
             )
             return result
-        except (ConfigurationError, Exception) as exc:
+        except (ConfigurationError, UpstreamServiceError) as exc:
             errors.append(f"ocr: {exc}")
 
         # 3. Both failed — never return 200 with provider="none"
