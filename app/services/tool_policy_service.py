@@ -81,7 +81,17 @@ class ToolPolicyService:
             "route_mode": route_mode or "",
         }
 
-        # Rule 0: BehaviorEngine override (Phase 3)
+        # Rule 1: unconditionally denied tools — ALWAYS checked first,
+        # even before BehaviorEngine override. No mode or decision can
+        # allow shell_command, exec, terminal, etc.
+        if tool_name.lower() in _ALWAYS_DENIED:
+            return ToolPolicyDecision(
+                False,
+                f"Tool policy denied: '{tool_name}' is blocked for all modes",
+                checked_fields={**checked, "rule": "always_denied"},
+            )
+
+        # Rule 2: BehaviorEngine override (Phase 3)
         if behavior_decision is not None:
             group = _classify_tool(tool_name)
             allowed = set(behavior_decision.allowed_tool_groups)
@@ -109,15 +119,7 @@ class ToolPolicyService:
 
         # ── Legacy mode logic below (when behavior_decision is None) ──
 
-        # Rule 1: unconditionally denied tools
-        if tool_name.lower() in _ALWAYS_DENIED:
-            return ToolPolicyDecision(
-                False,
-                f"Tool policy denied: '{tool_name}' is blocked for all modes",
-                checked_fields={**checked, "rule": "always_denied"},
-            )
-
-        # Rule 2: mode-aware group check
+        # Rule 4: mode-aware group check (legacy path)
         group = _classify_tool(tool_name)
         allowed_groups = _MODE_TOOL_GROUPS.get(conversation_mode, _MODE_TOOL_GROUPS.get("companion", set()))
         if group not in allowed_groups:

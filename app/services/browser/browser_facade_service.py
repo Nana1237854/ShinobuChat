@@ -153,6 +153,10 @@ class BrowserFacadeService:
     # ── Open URL ──
 
     def open_url(self, user_id: UUID, url: str) -> dict:
+        # Plan A: open-url is gated by browser_reader_enabled.
+        # "open_url" means manually opening the system default browser — not
+        # Playwright-level automation.  browser_automation_enabled controls
+        # higher-risk automated browser actions (future).
         self._capability_policy.ensure(user_id, "browser_reader")
 
         result = BrowserAutomationService().open_url(url, user_id=user_id)

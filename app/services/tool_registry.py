@@ -104,7 +104,9 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if not tool:
             return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=False)
-        context.metadata.clear()
+        # Phase 3 fix: do NOT clear metadata — it carries message_id, conversation_mode,
+        # route_mode and other fields needed by ToolAudit and downstream verifiers.
+        # Handlers receive a fresh dict copy to avoid cross-tool pollution.
         return tool.handler(arguments, context)
 
     def execute_verified(

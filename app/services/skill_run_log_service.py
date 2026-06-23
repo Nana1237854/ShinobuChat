@@ -59,6 +59,13 @@ class SkillRunLogService:
     def get(self, run_id: UUID) -> SkillRunLog | None:
         return self.db.query(SkillRunLog).filter(SkillRunLog.id == run_id).first()
 
+    def get_for_user(self, run_id: UUID, user_id: UUID) -> SkillRunLog | None:
+        return (
+            self.db.query(SkillRunLog)
+            .filter(SkillRunLog.id == run_id, SkillRunLog.user_id == user_id)
+            .first()
+        )
+
     @staticmethod
     def _summary(text: str, limit: int = 300) -> str:
         clean = " ".join((text or "").split())

@@ -116,6 +116,7 @@ def list_action_audits_by_message(
 def list_job_runs(
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    current_user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     rows = JobRunLogService(db).list_all(limit=limit)
@@ -137,6 +138,7 @@ def list_job_runs(
 @router.get("/jobs/runs/{run_id}")
 def get_job_run(
     run_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> dict:
     row = JobRunLogService(db).get(run_id)
@@ -236,9 +238,10 @@ def list_skill_runs(
 @router.get("/skills/runs/{run_id}")
 def get_skill_run(
     run_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> dict:
-    row = SkillRunLogService(db).get(run_id)
+    row = SkillRunLogService(db).get_for_user(run_id, current_user_id)
     if row is None:
         raise NotFoundError("SkillRunLog not found")
     return {
@@ -258,6 +261,15 @@ def get_skill_run(
 # ── Phase 3: Capabilities ──
 
 
+def _serialize_capability_decision(decision) -> dict:
+    """Explicitly serialize CapabilityDecision to JSON-safe dict."""
+    return {
+        "enabled": decision.enabled,
+        "requires_confirmation": decision.requires_confirmation,
+        "reason": decision.reason,
+    }
+
+
 @router.get("/capabilities")
 def list_capabilities(
     current_user_id: UUID = Depends(get_current_user_id),
@@ -273,7 +285,9 @@ def list_capabilities(
                 "label": c.label,
                 "description": c.description,
                 "risk_level": c.risk_level,
-                "decision": policy.check(current_user_id, c.key),
+                "decision": _serialize_capability_decision(
+                    policy.check(current_user_id, c.key)
+                ),
             }
             for c in registry.list()
         ]

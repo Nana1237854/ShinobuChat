@@ -10,6 +10,7 @@ Audit write failures must never affect the main response path.
 from __future__ import annotations
 
 import logging
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -22,6 +23,11 @@ logger = logging.getLogger(__name__)
 SENSITIVE_KEYWORDS = {
     "api_key", "apikey", "token", "access_token", "refresh_token",
     "password", "secret", "authorization", "cookie",
+}
+
+SENSITIVE_QUERY_KEYS = {
+    "token", "access_token", "refresh_token", "api_key", "apikey",
+    "key", "secret", "password", "auth", "authorization", "cookie",
 }
 
 
@@ -37,12 +43,54 @@ def redact_payload(payload: dict | None) -> dict:
             result[key] = redact_payload(value)
         elif isinstance(value, list):
             result[key] = [
-                redact_payload(v) if isinstance(v, dict) else _truncate(v)
+                redact_payload(v) if isinstance(v, dict)
+                else _sanitize_value(v)
                 for v in value
             ]
         else:
-            result[key] = _truncate(value)
+            result[key] = _sanitize_value(value)
     return result
+
+
+def _redact_url(text: str | None) -> str:
+    """Redact sensitive query parameters from a URL string."""
+    if not text or not isinstance(text, str):
+        return ""
+    try:
+        parsed = urlparse(text)
+    except Exception:
+        return text
+    if not parsed.query:
+        return text
+    try:
+        params = parse_qsl(parsed.query, keep_blank_values=True)
+    except Exception:
+        return text
+    redacted = [
+        (k, "REDACTED" if k.lower() in SENSITIVE_QUERY_KEYS else v)
+        for k, v in params
+    ]
+    try:
+        clean = urlunparse(parsed._replace(query=urlencode(redacted)))
+    except Exception:
+        clean = text
+    return clean
+
+
+def _is_url_like(value) -> bool:
+    """Heuristic: treat strings starting with http:// or https:// as URLs."""
+    if not isinstance(value, str):
+        return False
+    return value.startswith(("http://", "https://"))
+
+
+def _sanitize_value(value) -> object:
+    """Redact URL query params for URL-like strings, truncate others."""
+    if isinstance(value, str):
+        if _is_url_like(value):
+            return _redact_url(value)
+        return _truncate(value)
+    return value
 
 
 def _truncate(value, limit: int = 500) -> str:
@@ -80,13 +128,15 @@ class ActionAuditService:
         reasons: list[str] | None = None,
         checked_fields: dict | None = None,
     ):
+        safe_target = _sanitize_value(target) if target else ""
+
         log = ActionAuditLog(
             user_id=user_id,
             conversation_id=conversation_id,
             message_id=message_id,
             source=source,
             action_type=action_type,
-            target=target,
+            target=str(safe_target),
             status=status,
             risk_level=risk_level,
             requires_confirmation=requires_confirmation,

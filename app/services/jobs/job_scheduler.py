@@ -16,11 +16,18 @@ logger = logging.getLogger("shinobu.jobs")
 
 
 class JobScheduler:
-    def __init__(self, jobs: list[BaseJob], log_service):
+    def __init__(self, jobs: list[BaseJob], log_service_class, *, session_factory=None):
         self.jobs = [j for j in jobs if j.enabled]
-        self.log_service = log_service
+        self._log_service_class = log_service_class
+        self._session_factory = session_factory
         self._tasks: list[asyncio.Task] = []
         self._stopped = False
+
+    def _get_session(self):
+        if self._session_factory is not None:
+            return self._session_factory()
+        from app.db.session import SessionLocal
+        return SessionLocal()
 
     def start(self):
         for job in self.jobs:
@@ -45,22 +52,20 @@ class JobScheduler:
                 break
 
     async def run_once(self, job: BaseJob):
-        from app.db.session import SessionLocal
-
         started_at = local_now()
         try:
             result = await asyncio.to_thread(job.run_once)
-            db = SessionLocal()
+            db = self._get_session()
             try:
-                self.log_service.__class__(db).record_success(job.name, started_at, result)
+                self._log_service_class(db).record_success(job.name, started_at, result)
             finally:
                 db.close()
         except Exception as exc:
             logger.exception("Job failed: %s", job.name)
             try:
-                db = SessionLocal()
+                db = self._get_session()
                 try:
-                    self.log_service.__class__(db).record_failure(job.name, started_at, exc)
+                    self._log_service_class(db).record_failure(job.name, started_at, exc)
                 finally:
                     db.close()
             except Exception:
@@ -68,21 +73,19 @@ class JobScheduler:
 
     def run_once_for_test(self, job: BaseJob):
         """Synchronous run-once for tests."""
-        from app.db.session import SessionLocal
-
         started_at = local_now()
         try:
             result = job.run_once()
-            db = SessionLocal()
+            db = self._get_session()
             try:
-                self.log_service.__class__(db).record_success(job.name, started_at, result)
+                self._log_service_class(db).record_success(job.name, started_at, result)
             finally:
                 db.close()
         except Exception as exc:
             try:
-                db = SessionLocal()
+                db = self._get_session()
                 try:
-                    self.log_service.__class__(db).record_failure(job.name, started_at, exc)
+                    self._log_service_class(db).record_failure(job.name, started_at, exc)
                 finally:
                     db.close()
             except Exception:
