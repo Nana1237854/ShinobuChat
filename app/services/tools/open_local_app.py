@@ -22,12 +22,20 @@ def create_tool(registry) -> Tool:
                 ensure_ascii=False,
             )
 
-        # Import here to avoid circular imports at module level
+        # Permission check (F16)
         from app.db.session import SessionLocal
+        from app.services.local_agent_settings_service import LocalAgentSettingsService
         from app.services.local_app_service import LocalAppService
 
         db = SessionLocal()
         try:
+            settings_svc = LocalAgentSettingsService(db)
+            if not settings_svc.is_local_launcher_enabled(user_id):
+                return json.dumps(
+                    {"error": "Local Launcher 已关闭。请在设置 → 权限中心中开启后再试。"},
+                    ensure_ascii=False,
+                )
+
             svc = LocalAppService(db)
             result = svc.open_app(
                 user_id,

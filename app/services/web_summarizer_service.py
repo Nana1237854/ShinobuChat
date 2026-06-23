@@ -31,8 +31,12 @@ class WebSummarizerService:
         user_id: UUID | None = None,
         question: str = "",
         max_chars: int = 10000,
+        runtime_config: dict | None = None,
     ) -> dict:
         """Read *url* and return an LLM-generated summary.
+
+        *runtime_config* is forwarded to AIClient.stream_chat() so that
+        per-user AI keys/models are used instead of global settings.
 
         Returns:
           dict with: status, summary, key_points, source_url, message
@@ -75,6 +79,7 @@ class WebSummarizerService:
             for chunk in self._ai.stream_chat(
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=800,
+                runtime_config=runtime_config,
             ):
                 full_response += chunk
         except Exception as exc:

@@ -16,6 +16,7 @@ from app.api.deps import get_config_service, get_current_user_id
 from app.core.time import local_now
 from app.db.session import get_db
 from app.models.browser_action_log import BrowserActionLog
+from app.services.local_agent_settings_service import LocalAgentSettingsService
 from app.models.trusted_download_source import TrustedDownloadSource
 from app.schemas.browser import (
     BrowserActionLogItem,
@@ -58,7 +59,9 @@ def browser_search(
     body: BrowserSearchRequest,
     user_id: UUID = Depends(get_current_user_id),
     config_service: ConfigService = Depends(get_config_service),
+    db: Session = Depends(get_db),
 ) -> BrowserSearchResponse:
+    LocalAgentSettingsService(db).ensure_browser_reader_enabled(user_id)
     api_key = config_service.get_effective_value(user_id, "google_search_api_key") or ""
     cx = config_service.get_effective_value(user_id, "google_search_cx") or ""
 
@@ -77,6 +80,7 @@ def browser_read(
     user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> BrowserReadResponse:
+    LocalAgentSettingsService(db).ensure_browser_reader_enabled(user_id)
     svc = WebReaderService()
     result = svc.read(body.url, user_id=user_id, max_chars=body.max_chars)
     _log_browser_action(
@@ -98,13 +102,15 @@ def browser_summarize(
     config_service: ConfigService = Depends(get_config_service),
     db: Session = Depends(get_db),
 ) -> BrowserSummarizeResponse:
+    LocalAgentSettingsService(db).ensure_browser_reader_enabled(user_id)
     from app.services.ai_client import AIClient
 
     runtime = config_service.resolve_runtime(user_id)
     ai_client = AIClient()
     svc = WebSummarizerService(ai_client=ai_client)
     result = svc.summarize(
-        body.url, user_id=user_id, question=body.question, max_chars=body.max_chars
+        body.url, user_id=user_id, question=body.question, max_chars=body.max_chars,
+        runtime_config=runtime,
     )
     _log_browser_action(
         db, user_id, "browser_summarize", body.url,
@@ -124,6 +130,7 @@ def browser_open_url(
     user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> BrowserOpenUrlResponse:
+    LocalAgentSettingsService(db).ensure_browser_reader_enabled(user_id)
     svc = BrowserAutomationService()
     result = svc.open_url(body.url, user_id=user_id)
     _log_browser_action(
@@ -144,6 +151,7 @@ def extract_download_candidates(
     user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> ExtractDownloadCandidatesResponse:
+    LocalAgentSettingsService(db).ensure_browser_reader_enabled(user_id)
     svc = DownloadService(db)
     result = svc.extract_candidates(body.url, user_id=user_id)
     _log_browser_action(
@@ -164,6 +172,7 @@ def classify_downloads(
     user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> ClassifyDownloadResponse:
+    LocalAgentSettingsService(db).ensure_browser_reader_enabled(user_id)
     svc = DownloadService(db)
     candidates = [c.model_dump() for c in body.candidates]
     result = svc.classify(candidates)

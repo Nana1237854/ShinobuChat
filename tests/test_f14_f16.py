@@ -372,5 +372,165 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertEqual(result[0]["risk_level"], "medium")
 
 
+# =============================================================================
+# Fix 2 regression: LocalAgentSettingsService enforcement
+# =============================================================================
+
+class LocalAgentSettingsServiceTests(unittest.TestCase):
+    def test_defaults_all_enabled(self):
+        from app.services.local_agent_settings_service import LocalAgentSettingsService
+        from app.db.session import SessionLocal
+
+        db = SessionLocal()
+        try:
+            svc = LocalAgentSettingsService(db)
+            settings = svc.get_settings(None)  # None user_id won't match rows
+            self.assertTrue(settings["local_launcher_enabled"])
+            self.assertTrue(settings["browser_reader_enabled"])
+            self.assertFalse(settings["browser_automation_enabled"])
+            self.assertFalse(settings["mcp_enabled"])
+        finally:
+            db.close()
+
+    def test_forbidden_error_subclass(self):
+        from app.core.exceptions import ForbiddenError
+        err = ForbiddenError("test")
+        self.assertIsInstance(err, Exception)
+        self.assertEqual(err.detail, "test")
+
+    def test_is_local_launcher_enabled_no_rows(self):
+        from app.services.local_agent_settings_service import LocalAgentSettingsService
+        from app.db.session import SessionLocal
+
+        db = SessionLocal()
+        try:
+            svc = LocalAgentSettingsService(db)
+            # Use a random UUID that has no config rows
+            import uuid
+            self.assertTrue(svc.is_local_launcher_enabled(uuid.uuid4()))
+        finally:
+            db.close()
+
+
+# =============================================================================
+# Fix 3 regression: MCP disabled exit
+# =============================================================================
+
+class McpDisabledTests(unittest.TestCase):
+    def test_handle_request_rejects_tools_when_disabled(self):
+        from app.mcp import server
+        from app.mcp import config as mcp_config
+
+        original = mcp_config.MCP_ENABLED
+        try:
+            mcp_config.MCP_ENABLED = False
+            from app.mcp.tool_adapter import create_default_adapter
+            adapter = create_default_adapter()
+            resp = server.handle_request(
+                {"method": "tools/list", "id": 1}, adapter
+            )
+            self.assertIsNotNone(resp)
+            self.assertIn("error", resp)
+            self.assertIn("disabled", resp["error"]["message"])
+        finally:
+            mcp_config.MCP_ENABLED = original
+
+    def test_handle_request_allows_initialize_when_disabled(self):
+        from app.mcp import server
+        from app.mcp import config as mcp_config
+
+        original = mcp_config.MCP_ENABLED
+        try:
+            mcp_config.MCP_ENABLED = False
+            from app.mcp.tool_adapter import create_default_adapter
+            adapter = create_default_adapter()
+            resp = server.handle_request(
+                {"method": "initialize", "id": 1}, adapter
+            )
+            self.assertIsNotNone(resp)
+            self.assertIn("result", resp)
+            self.assertIn("ShinobuChat", resp["result"]["serverInfo"]["name"])
+        finally:
+            mcp_config.MCP_ENABLED = original
+
+
+# =============================================================================
+# Fix 4 regression: MCP ToolRegistry integration
+# =============================================================================
+
+class McpToolRegistryIntegrationTests(unittest.TestCase):
+    def test_adapter_accepts_registry(self):
+        from app.mcp.tool_adapter import McpToolAdapter
+        adapter = McpToolAdapter(tool_registry=None)
+        tools = adapter.list_tools()
+        self.assertEqual(len(tools), 0)
+
+    def test_fallback_handler_returns_error_for_unregistered(self):
+        from app.mcp.tool_adapter import McpToolAdapter
+        adapter = McpToolAdapter(tool_registry=None)
+        result = adapter.call_tool("nonexistent", {})
+        data = json.loads(result)
+        self.assertIn("error", data)
+
+    def test_create_default_adapter_has_fallback_handlers(self):
+        from app.mcp.tool_adapter import create_default_adapter
+        adapter = create_default_adapter(tool_registry=None)
+        tools = adapter.list_tools()
+        tool_names = {t["name"] for t in tools}
+        self.assertIn("read_webpage", tool_names)
+        self.assertIn("search_web", tool_names)
+        self.assertIn("open_url", tool_names)
+        self.assertIn("open_local_app", tool_names)
+
+    def test_fallback_read_webpage_works(self):
+        from app.mcp.tool_adapter import create_default_adapter
+        adapter = create_default_adapter(tool_registry=None)
+        result = adapter.call_tool("read_webpage", {"url": "https://example.com"})
+        data = json.loads(result)
+        self.assertIn("status", data)
+
+
+# =============================================================================
+# Fix 5 regression: TrustedSourceItem user_id None
+# =============================================================================
+
+class TrustedSourceItemSchemaTests(unittest.TestCase):
+    def test_user_id_none_allowed(self):
+        from app.schemas.browser import TrustedSourceItem
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        item = TrustedSourceItem(
+            id="00000000-0000-0000-0000-000000000001",
+            user_id=None,
+            domain="example.com",
+            trust_level="trusted",
+            source_type="builtin",
+            created_at=now,
+        )
+        self.assertIsNone(item.user_id)
+        self.assertEqual(item.domain, "example.com")
+
+
+# =============================================================================
+# Fix 6 regression: WebSummarizerService runtime_config
+# =============================================================================
+
+class WebSummarizerRuntimeConfigTests(unittest.TestCase):
+    def test_summarize_accepts_runtime_config(self):
+        from app.services.web_summarizer_service import WebSummarizerService
+        svc = WebSummarizerService()
+        result = svc.summarize(
+            "https://example.com",
+            runtime_config={"ai_model": "custom-model"},
+        )
+        self.assertIn("status", result)
+
+    def test_runtime_config_keyword(self):
+        import inspect
+        from app.services.web_summarizer_service import WebSummarizerService
+        sig = inspect.signature(WebSummarizerService.summarize)
+        self.assertIn("runtime_config", sig.parameters)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,7 @@ from app.schemas.local_app import (
     LocalAppTestResponse,
     LocalAppUpdate,
 )
+from app.services.local_agent_settings_service import LocalAgentSettingsService
 from app.services.local_app_service import LocalAppService
 
 router = APIRouter(prefix="/local-apps", tags=["local-apps"])
@@ -68,6 +69,7 @@ def test_local_app(
     user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> LocalAppTestResponse:
+    LocalAgentSettingsService(db).ensure_local_launcher_enabled(user_id)
     svc = LocalAppService(db)
     app = svc.get_app(app_id, user_id)
     result = svc.open_app(
@@ -91,6 +93,7 @@ def open_local_app(
     user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> LocalAppOpenResponse:
+    LocalAgentSettingsService(db).ensure_local_launcher_enabled(user_id)
     svc = LocalAppService(db)
     result = svc.open_app(
         user_id,

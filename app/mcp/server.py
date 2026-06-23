@@ -30,6 +30,14 @@ def handle_request(request: dict, adapter) -> dict | None:
     method = request.get("method", "")
     req_id = request.get("id")
 
+    # Defense-in-depth: reject tool-related calls when MCP is disabled
+    if not MCP_ENABLED and method in ("tools/list", "tools/call"):
+        return {
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": {"code": -32001, "message": "MCP is disabled. Set SC_MCP_ENABLED=true."},
+        }
+
     if method == "initialize":
         return {
             "jsonrpc": "2.0",
@@ -103,15 +111,14 @@ def run_stdio() -> None:
     """Run the MCP server in stdio mode."""
     if not MCP_ENABLED:
         logger.warning(
-            "MCP is disabled. Set SC_MCP_ENABLED=true to enable."
+            "MCP is disabled. Set SC_MCP_ENABLED=true to enable. Exiting."
         )
-        # Still run but reject all tool calls
-        # Actually, exit cleanly so the client knows
         _send({
             "jsonrpc": "2.0",
             "method": "log",
-            "params": {"level": "warning", "message": "MCP is currently disabled."},
+            "params": {"level": "warning", "message": "MCP is currently disabled. Set SC_MCP_ENABLED=true."},
         })
+        return  # Exit cleanly — do not accept any requests
 
     adapter = create_default_adapter()
     logger.info("MCP Server ready (stdio mode). Safe tools: %s", sorted(MCP_SAFE_TOOLS))

@@ -429,11 +429,20 @@ class MessageService:
         Returns (action_result, pending_info_or_none).
         """
         from app.db.session import SessionLocal
+        from app.services.local_agent_settings_service import LocalAgentSettingsService
         from app.services.local_app_service import LocalAppService
 
         da = state.direct_action
         db = SessionLocal()
         try:
+            # F16: check permission before executing quick-intent direct action
+            settings_svc = LocalAgentSettingsService(db)
+            if not settings_svc.is_local_launcher_enabled(user_id):
+                return {
+                    "status": "forbidden",
+                    "message": "Local Launcher 已关闭。请在设置 → 权限中心中开启后再试。",
+                }, None
+
             svc = LocalAppService(db)
             result = svc.open_app(
                 user_id,

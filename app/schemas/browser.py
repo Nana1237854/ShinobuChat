@@ -153,7 +153,7 @@ class BrowserActionResponse(BaseModel):
 class TrustedSourceItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
-    user_id: UUID
+    user_id: UUID | None = None
     domain: str
     product_key: str | None = None
     trust_level: str
