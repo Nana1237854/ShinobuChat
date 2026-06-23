@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any, Iterator
+from uuid import UUID
 
 from app.core.config import settings
 from app.models.message import Message
@@ -61,6 +62,8 @@ class AgentOrchestrator:
         ai_config: dict[str, Any] | None = None,
         conversation_mode: str = "companion",
         route_mode: str | None = None,
+        user_id: UUID | None = None,
+        conversation_id: UUID | None = None,
     ) -> Iterator[StreamEvent | str]:
         tools = self.tool_registry.schemas()
         context = ToolContext(
@@ -70,6 +73,8 @@ class AgentOrchestrator:
                 "conversation_mode": conversation_mode,
                 "route_mode": route_mode or "agent",
             },
+            user_id=user_id,
+            conversation_id=conversation_id,
         )
         for step in range(max(settings.agent_max_steps, 1)):
             yield StreamEvent(

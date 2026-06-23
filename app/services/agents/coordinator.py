@@ -49,6 +49,7 @@ class AgentCoordinator:
         history: list[Message],
         user_skills: list[Skill] | None = None,
         conversation_id: uuid.UUID | None = None,
+        vision_context: str | None = None,
     ) -> AgentPlan:
         decision = self.resolve_route(requested_route_mode, content, history)
         memory_context = self.memory_agent.search(user_id, content)
@@ -64,6 +65,12 @@ class AgentCoordinator:
         )
         if character_context:
             memory_context = [character_context, *memory_context]
+
+        # Vision context — TurnScratch only, NOT written to Memory / base_system
+        if vision_context:
+            vision_prompt = self._vision_context(vision_context)
+            if vision_prompt:
+                memory_context = [vision_prompt, *memory_context]
 
         # Persona tone instructions — injected as dynamic context, NOT base_system
         persona_context = self._persona_tone_context(user_id)
@@ -138,6 +145,8 @@ class AgentCoordinator:
         ai_config: dict[str, Any] | None = None,
         conversation_mode: str = "companion",
         route_mode: str | None = None,
+        user_id: uuid.UUID | None = None,
+        conversation_id: uuid.UUID | None = None,
     ) -> Iterator[StreamEvent | str]:
         yield from self.task_agent.run(
             messages,
@@ -146,6 +155,8 @@ class AgentCoordinator:
             ai_config=ai_config,
             conversation_mode=conversation_mode,
             route_mode=route_mode,
+            user_id=user_id,
+            conversation_id=conversation_id,
         )
 
     @staticmethod
@@ -233,6 +244,17 @@ class AgentCoordinator:
         ):
             return RouterDecision(RouteMode.AGENT, 0.93, "continue agent follow-up after assistant clarification")
         return None
+
+    @staticmethod
+    def _vision_context(vision_context: str) -> str:
+        """Format vision analysis result as TurnScratch context.
+
+        The returned string is injected as dynamic TurnScratch, NOT written
+        to Memory and NOT saved in base_system / PrefixCacheManager zone.
+        """
+        if not vision_context or not vision_context.strip():
+            return ""
+        return f"【图片分析结果】\n{vision_context.strip()}"
 
     @staticmethod
     def _conversation_characters_context(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Iterator
+from uuid import UUID
 
 from app.models.message import Message
 from app.services.agent_orchestrator import AgentOrchestrator
@@ -70,6 +71,8 @@ class TaskAgent:
         ai_config: dict[str, Any] | None = None,
         conversation_mode: str = "companion",
         route_mode: str | None = None,
+        user_id: UUID | None = None,
+        conversation_id: UUID | None = None,
     ) -> Iterator[StreamEvent | str]:
         yield from self.agent_orchestrator.run(
             messages,
@@ -78,4 +81,6 @@ class TaskAgent:
             ai_config=ai_config,
             conversation_mode=conversation_mode,
             route_mode=route_mode,
+            user_id=user_id,
+            conversation_id=conversation_id,
         )

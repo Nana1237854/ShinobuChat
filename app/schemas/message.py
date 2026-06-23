@@ -22,6 +22,7 @@ class MessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
     conversation_id: UUID | None = None
     route_mode: RouteMode = RouteMode.AUTO
+    vision_context: str | None = None
 
 
 class MessageOut(BaseModel):

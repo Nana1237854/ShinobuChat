@@ -102,6 +102,7 @@ class MessageService:
             for item in self._run_task_agent(
                 messages, history[:-1], payload.user_id, ai_config,
                 conversation_mode=state.conversation_mode,
+                conversation_id=state.conversation.id,
             ):
                 if isinstance(item, StreamEvent):
                     yield self._format_event(item)
@@ -260,6 +261,7 @@ class MessageService:
                 content=payload.content.strip(),
                 history=history,
                 user_skills=user_skills,
+                vision_context=payload.vision_context,
             )
 
         messages = self._build_ai_messages(payload.content.strip(), payload.route_mode, history)
@@ -278,6 +280,7 @@ class MessageService:
         user_id,
         ai_config,
         conversation_mode: str = "companion",
+        conversation_id=None,
     ):
         user_skills = (
             self.skill_manager.runtime_skills(user_id)
@@ -292,6 +295,8 @@ class MessageService:
                 ai_config=ai_config,
                 conversation_mode=conversation_mode,
                 route_mode="agent",
+                user_id=user_id,
+                conversation_id=conversation_id,
             )
             return
 
@@ -314,6 +319,8 @@ class MessageService:
             history,
             user_skills=user_skills,
             ai_config=ai_config,
+            user_id=user_id,
+            conversation_id=conversation_id,
         )
 
     def _schedule_memory_write(self, payload: MessageCreate, state: MessageStreamState) -> None:

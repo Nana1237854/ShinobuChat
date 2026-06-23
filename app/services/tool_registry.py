@@ -5,6 +5,7 @@ import json
 import pkgutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from uuid import UUID
 
 from app.models.message import Message
 from app.services.http_client import UrllibHttpClient
@@ -16,6 +17,8 @@ class ToolContext:
     history: list[Message]
     user_skills: dict[str, Skill] = field(default_factory=dict)
     metadata: dict[str, object] = field(default_factory=dict)
+    user_id: UUID | None = field(default=None)
+    conversation_id: UUID | None = field(default=None)
 
 
 @dataclass(frozen=True)
