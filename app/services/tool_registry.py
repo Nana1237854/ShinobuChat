@@ -58,6 +58,16 @@ class VerifiedToolResult:
         )
 
 
+def _risk_from_checked_fields(checked: dict) -> str:
+    if checked.get("has_failure_marker") or checked.get("starts_with_error"):
+        return "high"
+    if checked.get("result_empty"):
+        return "medium"
+    if not checked.get("generic_passed", True):
+        return "high"
+    return "low"
+
+
 class ToolRegistry:
     def __init__(
         self,
@@ -103,8 +113,12 @@ class ToolRegistry:
         arguments: dict,
         context: ToolContext,
     ) -> VerifiedToolResult:
+        import logging
+
         from app.services.tool_policy_service import ToolPolicyService
         from app.services.tool_verifier import ToolVerifier
+
+        _tlog = logging.getLogger("shinobu.tool_registry")
 
         conversation_mode = str(context.metadata.get("conversation_mode") or "companion")
         route_mode = str(context.metadata.get("route_mode") or "")
@@ -117,7 +131,7 @@ class ToolRegistry:
             route_mode=route_mode,
         )
         if not policy.allowed:
-            return VerifiedToolResult(
+            result = VerifiedToolResult(
                 output="",
                 verified=False,
                 reason=f"Tool policy denied: {policy.reason}",
@@ -128,12 +142,14 @@ class ToolRegistry:
                     "route_mode": route_mode,
                 },
             )
+            self._record_tool_audit(name, arguments, result, context)
+            return result
 
         output = self.execute(name, arguments, context)
         verification = ToolVerifier(session_factory=self.session_factory).verify(
             name, output, arguments, context
         )
-        return VerifiedToolResult(
+        result = VerifiedToolResult(
             output=output,
             verified=verification.passed,
             reason=verification.reason,
@@ -144,3 +160,47 @@ class ToolRegistry:
                 "route_mode": route_mode,
             },
         )
+        self._record_tool_audit(name, arguments, result, context)
+        return result
+
+    def _record_tool_audit(self, name: str, arguments: dict, result: VerifiedToolResult, context: ToolContext) -> None:
+        if self.session_factory is None:
+            return
+        try:
+            import logging
+
+            from app.services.action_audit_service import ActionAuditService
+
+            _tlog2 = logging.getLogger("shinobu.tool_audit")
+            db = self.session_factory()
+            try:
+                checked = result.checked_fields or {}
+                ActionAuditService(db).record(
+                    source="tool",
+                    action_type=name,
+                    user_id=context.user_id,
+                    conversation_id=context.conversation_id,
+                    message_id=context.metadata.get("message_id"),
+                    target=str(
+                        arguments.get("url")
+                        or arguments.get("app_key")
+                        or arguments.get("file_path")
+                        or ""
+                    ),
+                    status="ok" if result.verified else "failed",
+                    risk_level=_risk_from_checked_fields(checked),
+                    requires_confirmation=bool(checked.get("requires_confirmation")),
+                    policy_allowed=bool(checked.get("policy_allowed", True)),
+                    verified=result.verified,
+                    arguments=arguments,
+                    result=result.output,
+                    reasons=[result.reason],
+                    checked_fields=checked,
+                )
+            finally:
+                db.close()
+        except Exception:
+            import logging
+
+            _tlog3 = logging.getLogger("shinobu.tool_audit")
+            _tlog3.warning("Tool audit failed", exc_info=True)

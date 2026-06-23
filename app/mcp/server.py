@@ -46,12 +46,46 @@ def _resolve_default_user_id() -> UUID | None:
         return None
 
 
+def _audit_mcp_rejection(
+    default_user_id: UUID | None,
+    tool_name: str,
+    reason: str,
+    arguments: dict | None = None,
+) -> None:
+    try:
+        from app.db.session import SessionLocal
+        from app.services.action_audit_service import ActionAuditService
+
+        db = SessionLocal()
+        try:
+            ActionAuditService(db).record(
+                source="mcp",
+                action_type=tool_name or "unknown",
+                user_id=default_user_id,
+                target=tool_name or "",
+                status="blocked",
+                risk_level="blocked",
+                requires_confirmation=False,
+                policy_allowed=False,
+                verified=False,
+                arguments=arguments or {},
+                result={"error": reason},
+                reasons=[reason],
+                checked_fields={"mcp_server_rejected": True},
+            )
+        finally:
+            db.close()
+    except Exception:
+        logger.warning("MCP rejection audit failed", exc_info=True)
+
+
 def handle_request(request: dict, adapter, default_user_id: UUID | None = None) -> dict | None:
     method = request.get("method", "")
     req_id = request.get("id")
 
     # Defense-in-depth: reject tool-related calls when MCP is disabled
     if not MCP_ENABLED and method in ("tools/list", "tools/call"):
+        _audit_mcp_rejection(default_user_id, method, "MCP is disabled")
         return {
             "jsonrpc": "2.0",
             "id": req_id,
@@ -84,6 +118,11 @@ def handle_request(request: dict, adapter, default_user_id: UUID | None = None) 
         tool_name = params.get("name", "")
 
         if tool_name in MCP_BLOCKED_TOOLS:
+            _audit_mcp_rejection(
+                default_user_id, tool_name,
+                f"Tool '{tool_name}' is blocked for MCP use.",
+                params,
+            )
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
@@ -96,6 +135,11 @@ def handle_request(request: dict, adapter, default_user_id: UUID | None = None) 
             }
 
         if tool_name not in MCP_SAFE_TOOLS:
+            _audit_mcp_rejection(
+                default_user_id, tool_name,
+                f"Tool '{tool_name}' is not available via MCP.",
+                params,
+            )
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
@@ -109,6 +153,11 @@ def handle_request(request: dict, adapter, default_user_id: UUID | None = None) 
 
         # User-context gate: tools that need a real user must have one configured
         if tool_name in _USER_CONTEXT_REQUIRED_TOOLS and default_user_id is None:
+            _audit_mcp_rejection(
+                default_user_id, tool_name,
+                "SC_MCP_DEFAULT_USER_ID is required for this tool.",
+                params,
+            )
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,

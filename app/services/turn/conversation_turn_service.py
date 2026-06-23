@@ -60,6 +60,30 @@ class ConversationTurnService:
         self.db.refresh(conversation)
         self.db.refresh(user_message)
 
+        # ── Phase 2: PromptTrace ──
+        try:
+            from app.services.prompt_trace_service import PromptTraceService
+
+            trace_ctx = getattr(agent_plan, "trace_context", {}) or {}
+            PromptTraceService(self.db).create_trace(
+                user_id=payload.user_id,
+                conversation_id=conversation.id,
+                message_id=user_message.id,
+                route_mode=agent_plan.route_mode.value,
+                conversation_mode=agent_plan.conversation_mode,
+                router_reason=agent_plan.router_decision.reason,
+                memory_ids=trace_ctx.get("memory_ids", []),
+                activated_skill_names=trace_ctx.get("activated_skill_names", []),
+                vision_context_used=trace_ctx.get("vision_context_used", False),
+                persona_context_used=trace_ctx.get("persona_context_used", False),
+                emotion_context_used=trace_ctx.get("emotion_context_used", False),
+                browser_context_used=trace_ctx.get("browser_context_used", False),
+                mcp_context_used=trace_ctx.get("mcp_context_used", False),
+                context_summary=trace_ctx.get("context_summary", {}),
+            )
+        except Exception:
+            logger.warning("PromptTrace creation failed", exc_info=True)
+
         state = MessageTurnState(
             conversation=conversation,
             user_message=user_message,

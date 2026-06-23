@@ -1,8 +1,8 @@
 """Download risk classifier — rule-based risk classification for download URLs.
 
-Three-layer classification:
-1. Hard blocklist — immediate blocked/high
-2. Trusted source lookup — can lower to trusted/low
+Three-layer classification (Phase 2 strengthened):
+1. Hard blocklist — immediate blocked/high, CANNOT be overridden by trusted source
+2. Trusted source lookup — can lower to trusted/low (but never override hard block)
 3. LLM advisory only — cannot override blocked/high
 """
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
@@ -47,6 +48,17 @@ _HIGH_RISK_EXTENSIONS = {".exe", ".msi", ".bat", ".cmd", ".ps1", ".scr", ".vbs",
 _MEDIUM_RISK_EXTENSIONS = {".zip", ".rar", ".7z", ".iso", ".dmg", ".run", ".sh", ".app"}
 
 
+@dataclass(frozen=True)
+class DownloadRiskDecision:
+    """Formalized risk decision that CANNOT be overridden by trusted source."""
+    risk_level: str  # blocked / high / medium / low / trusted / unknown
+    reasons: list[str]
+    suggested_action: str = ""
+    requires_confirmation: bool = False
+    policy_allowed: bool = True
+    hard_blocked: bool = False
+
+
 class DownloadRiskClassifier:
     """Classifies download candidates by risk level."""
 
@@ -54,15 +66,7 @@ class DownloadRiskClassifier:
         self._db = db
 
     def classify(self, candidates: list[dict]) -> list[dict]:
-        """Classify each candidate and return with risk metadata.
-
-        Args:
-            candidates: list of dicts with keys text, href, domain, extension
-
-        Returns:
-            list of dicts with added keys: risk_level, reasons, suggested_action,
-            requires_confirmation
-        """
+        """Classify each candidate and return with risk metadata."""
         trusted_domains = self._load_trusted_domains() if self._db else {}
 
         results: list[dict] = []
@@ -72,26 +76,18 @@ class DownloadRiskClassifier:
             domain = c.get("domain", "")
             extension = c.get("extension", "")
 
-            risk_level, reasons = self._classify_one(
-                href, text, domain, extension, trusted_domains
-            )
-
-            requires_confirmation = risk_level != "blocked"
-            if risk_level in ("trusted", "low") and extension in _HIGH_RISK_EXTENSIONS:
-                requires_confirmation = True
-                reasons.append("Trusted source but file is an executable — requires confirmation")
-
-            suggested_action = self._suggested_action(risk_level, requires_confirmation)
-
+            decision = self._decide(href, text, domain, extension, trusted_domains)
             results.append({
                 "text": text,
                 "href": href,
                 "domain": domain,
                 "extension": extension,
-                "risk_level": risk_level,
-                "reasons": reasons,
-                "suggested_action": suggested_action,
-                "requires_confirmation": requires_confirmation,
+                "risk_level": decision.risk_level,
+                "reasons": decision.reasons,
+                "suggested_action": decision.suggested_action,
+                "requires_confirmation": decision.requires_confirmation,
+                "policy_allowed": decision.policy_allowed,
+                "hard_blocked": decision.hard_blocked,
             })
 
         return results
@@ -101,25 +97,34 @@ class DownloadRiskClassifier:
         return self.classify([candidate])[0]
 
     # ------------------------------------------------------------------
-    # Internal
+    # Decision engine
     # ------------------------------------------------------------------
 
-    def _classify_one(
+    def _decide(
         self,
         href: str,
         text: str,
         domain: str,
         extension: str,
         trusted_domains: dict[str, dict],
-    ) -> tuple[str, list[str]]:
-        """Return (risk_level, reasons) for one candidate."""
+    ) -> DownloadRiskDecision:
+        """Return a formal DownloadRiskDecision for one candidate.
 
-        # --- Layer 1: hard blocklist ---
+        Hard blocklist ALWAYS wins — trusted source cannot override it.
+        """
+        # ── Layer 1: hard blocklist (CANNOT be overridden) ──
         blocked_reason = self._check_blocklist(href, domain)
         if blocked_reason:
-            return "blocked", [blocked_reason]
+            return DownloadRiskDecision(
+                risk_level="blocked",
+                reasons=[blocked_reason],
+                suggested_action="This link is blocked by security policy and cannot be downloaded.",
+                requires_confirmation=False,
+                policy_allowed=False,
+                hard_blocked=True,
+            )
 
-        # High risk from keywords
+        # High risk from keywords or double-extension disguise
         high_reasons: list[str] = []
         text_lower = text.lower()
         for kw in _HIGH_RISK_KEYWORDS:
@@ -133,27 +138,79 @@ class DownloadRiskClassifier:
             high_reasons.append(f"Executable file extension ({extension}) from untrusted source")
 
         if high_reasons:
-            return "high", high_reasons
+            return DownloadRiskDecision(
+                risk_level="high",
+                reasons=high_reasons,
+                suggested_action="This download is flagged as high risk. Manual review required.",
+                requires_confirmation=True,
+                policy_allowed=False,
+            )
 
-        # --- Layer 2: trusted sources ---
+        # ── Layer 2: trusted sources (only reaches here if NOT hard-blocked) ──
         trust = trusted_domains.get(domain)
         if trust:
-            return trust.get("trust_level", "trusted"), ["Domain is in trusted sources list"]
+            trust_level = trust.get("trust_level", "trusted")
+            # Trusted source with executable — still requires confirmation
+            confirmed = extension not in _HIGH_RISK_EXTENSIONS
+            return DownloadRiskDecision(
+                risk_level=trust_level,
+                reasons=["Domain is in trusted sources list"],
+                suggested_action=(
+                    "Download appears safe, but always verify file contents."
+                    if confirmed
+                    else "Trusted source but file is an executable — requires confirmation"
+                ),
+                requires_confirmation=not confirmed,
+                policy_allowed=True,
+            )
 
         # Medium risk extensions
         if extension in _MEDIUM_RISK_EXTENSIONS:
-            return "medium", [f"Archive/installer file ({extension}) from unverified source"]
+            return DownloadRiskDecision(
+                risk_level="medium",
+                reasons=[f"Archive/installer file ({extension}) from unverified source"],
+                suggested_action="Verify the source before opening the downloaded file.",
+                requires_confirmation=True,
+                policy_allowed=True,
+            )
 
         # Low/unknown
         if extension in {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".mp3", ".mp4", ".png", ".jpg"}:
-            return "low", ["Common file format, low risk"]
-        if extension:
-            return "unknown", ["Unknown file type"]
+            return DownloadRiskDecision(
+                risk_level="low",
+                reasons=["Common file format, low risk"],
+                suggested_action="Download appears safe, but always verify file contents.",
+                requires_confirmation=False,
+                policy_allowed=True,
+            )
 
-        return "unknown", ["No recognized download risk indicators"]
+        if extension:
+            return DownloadRiskDecision(
+                risk_level="unknown",
+                reasons=["Unknown file type"],
+                suggested_action="Verify the source before downloading.",
+                requires_confirmation=True,
+                policy_allowed=True,
+            )
+
+        return DownloadRiskDecision(
+            risk_level="unknown",
+            reasons=["No recognized download risk indicators"],
+            suggested_action="Download appears safe, but always verify file contents.",
+            requires_confirmation=False,
+            policy_allowed=True,
+        )
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
 
     def _check_blocklist(self, href: str, domain: str) -> str | None:
-        """Return a block reason if the URL should be blocked outright."""
+        """Return a block reason if the URL should be blocked outright.
+
+        Hard blocklist takes priority over everything — trusted source,
+        LLM advisory, etc. cannot override it.
+        """
         try:
             parsed = urlparse(href)
         except Exception:
@@ -175,17 +232,6 @@ class DownloadRiskClassifier:
 
         return None
 
-    def _suggested_action(self, risk_level: str, requires_confirmation: bool) -> str:
-        if risk_level == "blocked":
-            return "This link is blocked by security policy and cannot be downloaded."
-        if risk_level == "high":
-            return "This download is flagged as high risk. Manual review required."
-        if requires_confirmation:
-            return "Confirm before downloading. Do not run the installer until you trust the source."
-        if risk_level == "medium":
-            return "Verify the source before opening the downloaded file."
-        return "Download appears safe, but always verify file contents."
-
     def _load_trusted_domains(self) -> dict[str, dict]:
         if self._db is None:
             return {}
@@ -200,10 +246,8 @@ class DownloadRiskClassifier:
 
 def _has_double_extension(href: str) -> bool:
     path = urlparse(href).path or ""
-    # Check for double extension disguise (e.g., .jpg.exe, .pdf.msi)
     if _DOUBLE_EXTENSION_PATTERN.search(path):
         return True
-    # Also catch patterns like .exe.jpg (reverse order)
     return bool(re.search(
         r"\.(exe|msi|bat|cmd|ps1|scr|vbs)\.(jpg|jpeg|png|gif|pdf|doc|txt|mp3|zip)$",
         path, re.IGNORECASE,

@@ -73,6 +73,21 @@ def ensure_trusted_download_sources_columns() -> None:
             connection.execute(text(statement))
 
 
+def ensure_phase2_columns() -> None:
+    """Add Phase 2 columns to existing tables, and idempotent constraints for new tables."""
+    if engine.dialect.name != "postgresql":
+        return
+
+    statements = [
+        "ALTER TABLE action_audit_logs ADD COLUMN IF NOT EXISTS verified BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE action_audit_logs ADD COLUMN IF NOT EXISTS requires_confirmation BOOLEAN NOT NULL DEFAULT FALSE",
+    ]
+
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
 def ensure_memory_columns() -> None:
     """Add missing columns to existing conversation_memories tables (idempotent)."""
     if engine.dialect.name != "postgresql":
@@ -111,6 +126,7 @@ def init_db() -> None:
     ensure_live2d_interactions_columns()
     ensure_character_profiles_columns()
     ensure_trusted_download_sources_columns()
+    ensure_phase2_columns()
 
 
 if __name__ == "__main__":

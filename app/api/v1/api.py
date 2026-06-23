@@ -6,6 +6,7 @@ from app.api.v1.routes import (
     characters,
     conversations,
     config,
+    debug,
     diaries,
     emotion,
     goals,
@@ -58,3 +59,4 @@ api_router.include_router(browser.router)
 api_router.include_router(local_agent.router)
 api_router.include_router(tasks.router)
 api_router.include_router(mcp.router)
+api_router.include_router(debug.router)

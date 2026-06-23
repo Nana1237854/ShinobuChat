@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 from app.models.message import Message
@@ -39,6 +39,7 @@ class AgentPlan:
     progress_events: list[StreamEvent]
     conversation_mode: str = "companion"
     direct_action: DirectActionPlan | None = None
+    trace_context: dict[str, object] = field(default_factory=dict)
 
 
 class AgentCoordinator:
@@ -133,6 +134,28 @@ class AgentCoordinator:
                 messages, progress_events = self.task_agent.build_messages(
                     content, history, memory_context
                 )
+        trace_context = {
+            "memory_ids": [],
+            "activated_skill_names": [s.name for s in (user_skills or [])],
+            "vision_context_used": bool(vision_context),
+            "persona_context_used": bool(persona_context),
+            "emotion_context_used": bool(
+                self.user_emotion_service is not None
+                and bool(self._user_emotion_context(content, history))
+            ),
+            "browser_context_used": any(
+                kw in content.lower()
+                for kw in ["read_webpage", "search_web", "浏览", "搜索", "网页", "read", "summarize"]
+            ),
+            "mcp_context_used": False,
+            "context_summary": {
+                "memory_context_count": len(memory_context),
+                "has_mode_context": bool(mode_context),
+                "has_character_context": bool(character_context),
+                "is_recall_question": self.memory_agent.is_recall_question(content),
+            },
+        }
+
         return AgentPlan(
             route_mode=decision.target,
             router_decision=decision,
@@ -141,6 +164,7 @@ class AgentCoordinator:
             progress_events=progress_events,
             conversation_mode=conversation_mode,
             direct_action=direct_action,
+            trace_context=trace_context,
         )
 
     def resolve_route(

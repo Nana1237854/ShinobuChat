@@ -1,15 +1,17 @@
 """Browser facade service — unified entry point for all browser operations.
 
 Aggregates WebSearch, WebReader, WebSummarizer, BrowserAutomation,
-Download, permission enforcement, and action logging.
+Download, permission enforcement, action logging, and Phase 2 ActionAudit.
 """
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.services.action_audit_service import ActionAuditService
 from app.services.ai_client import AIClient
 from app.services.browser.browser_action_log_service import BrowserActionLogService
 from app.services.browser.trusted_download_source_service import TrustedDownloadSourceService
@@ -21,6 +23,8 @@ from app.services.web_reader_service import WebReaderService
 from app.services.web_search_service import WebSearchService
 from app.services.web_summarizer_service import WebSummarizerService
 
+logger = logging.getLogger(__name__)
+
 
 class BrowserFacadeService:
     def __init__(self, db: Session, config_service: ConfigService):
@@ -29,6 +33,7 @@ class BrowserFacadeService:
         self.settings = LocalAgentSettingsService(db)
         self.logs = BrowserActionLogService(db)
         self.trusted = TrustedDownloadSourceService(db)
+        self._audit = ActionAuditService(db)
 
     # ── Search ──
 
@@ -50,6 +55,22 @@ class BrowserFacadeService:
             message=result.get("message", ""),
             payload_json={"query": query},
         )
+        try:
+            self._audit.record(
+                source="browser",
+                action_type="browser_search",
+                user_id=user_id,
+                target=query,
+                status=result.get("status", "ok"),
+                risk_level="low",
+                policy_allowed=True,
+                verified=result.get("status") == "ok",
+                arguments={"query": query},
+                result={"result_count": len(result.get("results", []))},
+                reasons=[result.get("message", "")] if result.get("message") else [],
+            )
+        except Exception:
+            logger.warning("Browser search audit failed", exc_info=True)
         return result
 
     # ── Read ──
@@ -66,6 +87,26 @@ class BrowserFacadeService:
             status=result.get("status", "error"),
             message=result.get("message", ""),
         )
+        try:
+            self._audit.record(
+                source="browser",
+                action_type="browser_read",
+                user_id=user_id,
+                target=url,
+                status=result.get("status", "ok"),
+                risk_level="low" if result.get("status") == "ok" else "unknown",
+                policy_allowed=True,
+                verified=result.get("status") == "ok",
+                arguments={"url": url, "max_chars": max_chars},
+                result={
+                    "title": result.get("title"),
+                    "content_length": len(result.get("content", "")),
+                    "link_count": len(result.get("links", [])),
+                },
+                reasons=[result.get("message", "")] if result.get("message") else [],
+            )
+        except Exception:
+            logger.warning("Browser read audit failed", exc_info=True)
         return result
 
     # ── Summarize ──
@@ -86,6 +127,25 @@ class BrowserFacadeService:
             status=result.get("status", "error"),
             message=result.get("message", ""),
         )
+        try:
+            self._audit.record(
+                source="browser",
+                action_type="browser_summarize",
+                user_id=user_id,
+                target=url,
+                status=result.get("status", "ok"),
+                risk_level="low",
+                policy_allowed=True,
+                verified=result.get("status") == "ok",
+                arguments={"url": url, "question": question, "max_chars": max_chars},
+                result={
+                    "summary_length": len(result.get("summary", "")),
+                    "key_points_count": len(result.get("key_points", [])),
+                },
+                reasons=[result.get("message", "")] if result.get("message") else [],
+            )
+        except Exception:
+            logger.warning("Browser summarize audit failed", exc_info=True)
         return result
 
     # ── Open URL ──
@@ -102,6 +162,22 @@ class BrowserFacadeService:
             status=result.get("status", "error"),
             message=result.get("message", ""),
         )
+        try:
+            self._audit.record(
+                source="browser",
+                action_type="browser_open_url",
+                user_id=user_id,
+                target=url,
+                status=result.get("status", "ok"),
+                risk_level="low",
+                policy_allowed=True,
+                verified=result.get("status") == "ok",
+                arguments={"url": url},
+                result={"message": result.get("message")},
+                reasons=[],
+            )
+        except Exception:
+            logger.warning("Browser open_url audit failed", exc_info=True)
         return result
 
     # ── Download candidates ──
@@ -118,6 +194,22 @@ class BrowserFacadeService:
             status=result.get("status", "error"),
             message=result.get("message", ""),
         )
+        try:
+            self._audit.record(
+                source="download",
+                action_type="extract_download_candidates",
+                user_id=user_id,
+                target=url,
+                status=result.get("status", "ok"),
+                risk_level="low",
+                policy_allowed=True,
+                verified=result.get("status") == "ok",
+                arguments={"url": url},
+                result={"candidate_count": len(result.get("candidates", []))},
+                reasons=[],
+            )
+        except Exception:
+            logger.warning("Download extract audit failed", exc_info=True)
         return result
 
     # ── Classify downloads ──
@@ -135,4 +227,26 @@ class BrowserFacadeService:
             message=result.get("message", ""),
             payload_json={"candidate_count": len(candidates)},
         )
+        try:
+            for item in result.get("classified", []):
+                self._audit.record(
+                    source="download",
+                    action_type="classify_download",
+                    user_id=user_id,
+                    target=item.get("href", ""),
+                    status="blocked" if item.get("risk_level") == "blocked" else "ok",
+                    risk_level=item.get("risk_level", "unknown"),
+                    requires_confirmation=item.get("requires_confirmation", False),
+                    policy_allowed=item.get("risk_level") != "blocked",
+                    verified=True,
+                    arguments={"candidate": item},
+                    result={"suggested_action": item.get("suggested_action")},
+                    reasons=item.get("reasons", []),
+                    checked_fields={
+                        "extension": item.get("extension"),
+                        "domain": item.get("domain"),
+                    },
+                )
+        except Exception:
+            logger.warning("Download classify audit failed", exc_info=True)
         return result
