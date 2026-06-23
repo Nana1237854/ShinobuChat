@@ -217,7 +217,7 @@ class SkillInstallUrlAndFileTests(unittest.TestCase):
         class FakeResponse:
             body = SEED_SKILL.encode("utf-8")
         fake_client = type("FakeClient", (), {
-            "request_bytes": lambda self, url, timeout: FakeResponse()
+            "request_bytes": lambda self, url, timeout, **kw: FakeResponse()
         })()
 
         mgr = self._manager()

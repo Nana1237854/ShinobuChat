@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from fastapi import status
 
 from app.api.error_handlers import app_error_handler
-from app.core.exceptions import ForbiddenError, PayloadTooLargeError
+from app.core.exceptions import ForbiddenError, PayloadTooLargeError, TooManyRequestsError
 
 
 class ErrorHandlerTests(unittest.TestCase):
@@ -30,6 +30,24 @@ class ErrorHandlerTests(unittest.TestCase):
         self.assertEqual(resp.status_code, status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
         data = json.loads(resp.body.decode())
         self.assertEqual(data["detail"], exc.detail)
+
+    def test_too_many_requests_maps_to_429_with_retry_after(self):
+        import asyncio
+
+        exc = TooManyRequestsError("Rate limit exceeded for test", retry_after=42)
+        resp = asyncio.run(app_error_handler(self.mock_request, exc))
+        self.assertEqual(resp.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        data = json.loads(resp.body.decode())
+        self.assertEqual(data["detail"], exc.detail)
+        self.assertEqual(resp.headers.get("Retry-After"), "42")
+
+    def test_too_many_requests_without_retry_after_has_no_header(self):
+        import asyncio
+
+        exc = TooManyRequestsError("Rate limited")
+        resp = asyncio.run(app_error_handler(self.mock_request, exc))
+        self.assertEqual(resp.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertNotIn("Retry-After", resp.headers)
 
 
 if __name__ == "__main__":

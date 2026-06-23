@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 import uuid
@@ -10,6 +11,8 @@ from typing import Callable
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 from app.core.exceptions import NotFoundError
 from app.db.session import SessionLocal
 from app.models.memory import Memory, Vector
@@ -175,7 +178,7 @@ class MemoryService:
                 ):
                     stored += 1
         except Exception as exc:  # Keep memory write failures off the user-visible reply path.
-            print(f"[MEMORY] skipped memory write: {exc}")
+            logger.debug("[MEMORY] skipped memory write: %s", exc)
         return stored
 
     def _parse_candidates(self, content: str) -> list[MemoryCandidate]:

@@ -1053,10 +1053,12 @@ description: Bad YAML
             body = VALID_SKILL.encode("utf-8")
 
         class FakeClient:
-            def request_bytes(self, url, timeout=30):
+            def request_bytes(self, url, timeout=30, **kwargs):
                 return FakeResponse()
 
         with patch(
+            "app.core.url_validation.validate_url_safe",
+        ), patch(
             "app.services.http_client.UrllibHttpClient",
             return_value=FakeClient(),
         ):

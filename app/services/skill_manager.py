@@ -123,17 +123,19 @@ class SkillManager:
 
     def install_from_url(self, user_id: UUID, url: str) -> UserSkill:
         """Fetch a SKILL.md from a URL and install it."""
-        from urllib.parse import urlparse
-
+        from app.core.url_validation import validate_url_safe
         from app.services.http_client import UrllibHttpClient
 
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"}:
-            raise BadRequestError("Skill URL must use http or https")
+        validate_url_safe(url)
 
         client = UrllibHttpClient()
         try:
-            response = client.request_bytes(url, timeout=30)
+            response = client.request_bytes(
+                url,
+                timeout=30,
+                max_download_bytes=100_000,
+                allow_internal_ips=False,
+            )
         except Exception as exc:
             raise BadRequestError(f"Failed to fetch skill from URL: {exc}") from exc
 

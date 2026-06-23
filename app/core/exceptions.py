@@ -32,5 +32,11 @@ class UnauthorizedError(AppError):
     pass
 
 
+class TooManyRequestsError(AppError):
+    def __init__(self, detail: str, retry_after: int = 0):
+        super().__init__(detail)
+        self.retry_after = retry_after
+
+
 class UpstreamServiceError(AppError):
     pass

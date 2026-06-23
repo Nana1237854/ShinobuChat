@@ -2,12 +2,13 @@ from functools import lru_cache
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.rate_limiter import RateLimiter
 from app.db.session import SessionLocal, get_db
 from app.services.agent_orchestrator import AgentOrchestrator
 from app.services.agent_service import AgentService
@@ -140,6 +141,35 @@ def get_voice_service() -> VoiceService:
 def get_live2d_service() -> Live2DService:
     return Live2DService()
 
+
+@lru_cache
+def get_rate_limiter() -> RateLimiter:
+    return RateLimiter()
+
+
+def rate_limit_user(key: str, limit: int, window_seconds: int):
+    def _check(
+        user_id: UUID = Depends(get_current_user_id),
+        limiter: RateLimiter = Depends(get_rate_limiter),
+    ) -> None:
+        if not settings.rate_limit_enabled:
+            return
+        limiter.check(f"{key}:user:{user_id}", limit, window_seconds)
+
+    return _check
+
+
+def rate_limit_ip(key: str, limit: int, window_seconds: int):
+    def _check(
+        request: Request,
+        limiter: RateLimiter = Depends(get_rate_limiter),
+    ) -> None:
+        if not settings.rate_limit_enabled:
+            return
+        client_ip = request.client.host if request.client else "0.0.0.0"
+        limiter.check(f"{key}:ip:{client_ip}", limit, window_seconds)
+
+    return _check
 
 
 def get_current_user_id(

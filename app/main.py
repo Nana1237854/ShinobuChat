@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -13,6 +14,32 @@ from app.core.exceptions import AppError
 from app.db.init_db import init_db
 from app.services.live2d_service import Live2DAssetService
 
+_startup_logger = logging.getLogger("shinobu.startup")
+
+
+def _check_production_config() -> None:
+    warnings: list[str] = []
+
+    if settings.jwt_secret_key == "replace-me-in-prod":
+        warnings.append(
+            "JWT secret key is still the default value. "
+            "Set SC_JWT_SECRET_KEY to a random 64+ character string in .env for production."
+        )
+    if not settings.config_encryption_key.strip():
+        warnings.append(
+            "Config encryption key is not set. "
+            "Set SC_CONFIG_ENCRYPTION_KEY in .env for production. "
+            'Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+        )
+    if settings.cors_allow_origins == ["*"]:
+        warnings.append(
+            "CORS is configured to allow all origins (*). "
+            "Set SC_CORS_ALLOW_ORIGINS to a specific list in .env for production."
+        )
+
+    for w in warnings:
+        _startup_logger.warning("PRODUCTION WARNING: %s", w)
+
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "shinobu-chat" / "dist"
 live2d_assets = Live2DAssetService(FRONTEND_DIST)
 
@@ -22,7 +49,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(AppError, app_error_handler)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.cors_allow_origins,
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -35,6 +62,7 @@ def create_app() -> FastAPI:
         from app.services.config_service import ConfigService
 
         ConfigService.validate_encryption_key()
+        _check_production_config()
         init_db()
 
         if settings.reminder_background_enabled:

@@ -3,7 +3,12 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
-from app.api.deps import get_config_service, get_current_user_id, get_image_understanding_service
+from app.api.deps import (
+    get_config_service,
+    get_current_user_id,
+    get_image_understanding_service,
+    rate_limit_user,
+)
 from app.schemas.vision import VisionAnalyzeResponse, VisionConfidence
 from app.services.config_service import ConfigService
 from app.services.image_understanding_service import ImageUnderstandingService
@@ -18,6 +23,7 @@ async def analyze_image(
     user_id: UUID = Depends(get_current_user_id),
     service: ImageUnderstandingService = Depends(get_image_understanding_service),
     config_service: ConfigService = Depends(get_config_service),
+    _: None = Depends(rate_limit_user("vision", 10, 60)),
 ) -> VisionAnalyzeResponse:
     runtime_config = config_service.resolve_runtime(user_id)
     result = await service.analyze(file, question, user_id, runtime_config)

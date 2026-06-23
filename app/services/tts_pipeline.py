@@ -1,11 +1,14 @@
 import asyncio
 import base64
+import logging
 from dataclasses import dataclass, field
 
 from app.schemas.voice import VoiceTTSRequest
 from app.services.stream_events import SseEncoder
 from app.services.text_cleaner import strip_tts_punctuation
 from app.services.voice_service import VoiceService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -51,7 +54,7 @@ class StreamProcessor:
                     speech = await self.voice_service.synthesize(
                         VoiceTTSRequest(text=spoken_text, emotion=self.emotion, context=self.context)
                     )
-                    print(f"[TTS] OK ({len(speech.audio)}B): {text[:60]}")
+                    logger.debug("[TTS] OK (%dB)", len(speech.audio))
                     if len(speech.audio) >= 100:
                         b64 = base64.b64encode(speech.audio).decode("ascii")
                         self.audio_queue.put_nowait({
@@ -60,7 +63,7 @@ class StreamProcessor:
                             "emotion": speech.emotion,
                         })
                 except Exception as e:
-                    print(f"[TTS] FAIL: {text[:60]} -> {e}")
+                    logger.debug("[TTS] FAIL: %s", e)
         finally:
             self.tts_done = True
             self.audio_queue.put_nowait("__DONE__")

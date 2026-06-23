@@ -77,12 +77,32 @@ class UrllibHttpClient:
         headers: dict[str, str] | None = None,
         body: bytes | None = None,
         timeout: int = 60,
+        max_download_bytes: int | None = None,
+        allow_internal_ips: bool = True,
     ) -> HttpResponse:
+        if not allow_internal_ips:
+            from app.core.url_validation import validate_url_safe
+
+            validate_url_safe(url)
+
         req = request.Request(url, data=body, headers=headers or {}, method=method)
         try:
             with request.urlopen(req, timeout=timeout) as resp:
                 media_type = resp.headers.get_content_type()
-                return HttpResponse(body=resp.read(), media_type=media_type)
+                if max_download_bytes is not None:
+                    content_length = resp.headers.get("Content-Length")
+                    if content_length is not None and int(content_length) > max_download_bytes:
+                        raise HttpTransportError(
+                            f"Response exceeds maximum size of {max_download_bytes} bytes"
+                        )
+                    body = resp.read(min(max_download_bytes + 1, 10 * 1024 * 1024))
+                    if len(body) > max_download_bytes:
+                        raise HttpTransportError(
+                            f"Response exceeds maximum size of {max_download_bytes} bytes"
+                        )
+                else:
+                    body = resp.read()
+                return HttpResponse(body=body, media_type=media_type)
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             raise HttpStatusError(detail) from exc

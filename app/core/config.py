@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     whisper_model: str = Field(default="whisper-1")
     whisper_language: str = Field(default="")
 
+    rate_limit_enabled: bool = Field(default=True)
+    cors_allow_origins: list[str] = Field(default=["*"])
+
     reminder_enabled: bool = Field(default=True)
     reminder_background_enabled: bool = Field(default=False)
     reminder_scan_interval_seconds: int = Field(default=60)

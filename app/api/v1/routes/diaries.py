@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.deps import get_current_user_id, get_diary_service
+from app.api.deps import get_current_user_id, get_diary_service, rate_limit_user
 from app.core.exceptions import BadRequestError, NotFoundError
 from app.schemas.diary import DiaryDetail, DiaryGenerateRequest, DiaryGenerateResponse, DiaryOut
 from app.services.diary_service import DiaryService
@@ -39,6 +39,7 @@ def generate_diary(
     payload: DiaryGenerateRequest | None = None,
     user_id: UUID = Depends(get_current_user_id),
     diary_service: DiaryService = Depends(get_diary_service),
+    _: None = Depends(rate_limit_user("diary", 5, 60)),
 ) -> DiaryGenerateResponse:
     try:
         return diary_service.generate(user_id, payload)

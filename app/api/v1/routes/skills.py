@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 
-from app.api.deps import get_current_user_id, get_skill_manager
+from app.api.deps import get_current_user_id, get_skill_manager, rate_limit_user
 from app.core.exceptions import BadRequestError
 from app.schemas.user_skill import (
     SkillInstallFromUrl,
@@ -32,6 +32,7 @@ def install_user_skill(
     payload: UserSkillCreate,
     user_id: UUID = Depends(get_current_user_id),
     service: SkillManager = Depends(get_skill_manager),
+    _: None = Depends(rate_limit_user("skill_install", 5, 60)),
 ) -> UserSkillDetailOut:
     skill = service.install_text(user_id, payload.content)
     return UserSkillDetailOut.model_validate(skill)
@@ -42,6 +43,7 @@ def install_skill_from_url(
     payload: SkillInstallFromUrl,
     user_id: UUID = Depends(get_current_user_id),
     service: SkillManager = Depends(get_skill_manager),
+    _: None = Depends(rate_limit_user("skill_install", 5, 60)),
 ) -> UserSkillDetailOut:
     skill = service.install_from_url(user_id, payload.url)
     return UserSkillDetailOut.model_validate(skill)
@@ -52,6 +54,7 @@ async def install_skill_from_file(
     file: UploadFile = File(...),
     user_id: UUID = Depends(get_current_user_id),
     service: SkillManager = Depends(get_skill_manager),
+    _: None = Depends(rate_limit_user("skill_install", 5, 60)),
 ) -> UserSkillDetailOut:
     content_bytes = await file.read()
     if len(content_bytes) > 100_000:

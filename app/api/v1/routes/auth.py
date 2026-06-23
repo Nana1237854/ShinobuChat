@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.deps import get_auth_service
+from app.api.deps import get_auth_service, rate_limit_ip
 from app.core.config import settings
 from app.schemas.auth import (
     DeviceAuthorizeRequest,
@@ -24,6 +24,7 @@ PENDING_DEVICE_AUTH: dict[str, dict] = {}
 def authorize_device(
     payload: DeviceAuthorizeRequest,
     auth_service: AuthService = Depends(get_auth_service),
+    _: None = Depends(rate_limit_ip("auth", 20, 60)),
 ) -> DeviceAuthorizeResponse:
     user = auth_service.authenticate_user(payload.email, payload.password)
 
@@ -52,6 +53,7 @@ def authorize_device(
 def device_token(
     payload: DeviceTokenRequest,
     auth_service: AuthService = Depends(get_auth_service),
+    _: None = Depends(rate_limit_ip("auth", 20, 60)),
 ) -> DeviceTokenResponse:
     auth_record = PENDING_DEVICE_AUTH.get(payload.device_code)
     if not auth_record:
