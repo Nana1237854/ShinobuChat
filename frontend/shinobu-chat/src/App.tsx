@@ -30,6 +30,7 @@ import { ReminderBubble } from './reminders/ReminderBubble';
 import { getDueReminders, dismissReminder, snoozeReminder } from './api/reminders';
 import { getConversationMode } from './api/modes';
 import { ApiRequestError } from './api/http';
+import { getErrorMessage } from './errorMessages';
 import { analyzeImage } from './api/vision';
 import { listGoals } from './api/goals';
 import { subscribeReminderEvents } from './realtime/sseClient';
@@ -135,6 +136,8 @@ export default function App() {
   const [galgameMode, setGalgameMode] = useState(false);
   const [spokenLines, setSpokenLines] = useState<string[]>([]);
   const [pendingVisionContext, setPendingVisionContext] = useState<string | null>(null);
+  const [visionLoading, setVisionLoading] = useState(false);
+  const [lastVisionFile, setLastVisionFile] = useState<File | null>(null);
   const [goalPreview, setGoalPreview] = useState<GoalItem[]>([]);
   const [reminderQueue, setReminderQueue] = useState<ReminderEvent[]>([]);
   const [reminderAction, setReminderAction] = useState<'snooze' | 'dismiss' | null>(null);
@@ -541,6 +544,16 @@ export default function App() {
     return lines.join('\n');
   };
 
+  const retryVisionImage = () => {
+    if (lastVisionFile) {
+      sendText('请描述这张图片', lastVisionFile);
+    }
+  };
+
+  const clearPendingVisionContext = () => {
+    setPendingVisionContext(null);
+  };
+
   const sendText = async (text: string, imageFile?: File) => {
     if (!session || streaming) return;
     setStreaming(true);
@@ -548,6 +561,7 @@ export default function App() {
     setEmotionState(null);
 
     if (imageFile) {
+      setLastVisionFile(imageFile);
       const imageUrl = URL.createObjectURL(imageFile);
       const userMsgId = `user-img-${Date.now()}`;
       const assistantMsgId = `vision-${Date.now()}`;
@@ -568,49 +582,65 @@ export default function App() {
           id: assistantMsgId,
           conversation_id: conversationId || 'pending',
           role: 'assistant',
-          content: '正在看图...',
+          content: '正在分析图片...',
           created_at: new Date().toISOString(),
-          status: 'streaming',
+          status: 'vision-loading',
         },
       ]);
 
-      setStatus('正在看图...');
+      setStatus('正在分析图片...');
+      setVisionLoading(true);
+      setLastVisionFile(imageFile);
 
       try {
         const result = await analyzeImage(session.accessToken, imageFile, question || null);
         URL.revokeObjectURL(imageUrl);
+        const providerLabel = result.provider === 'openai' ? 'OpenAI Vision' : result.provider === 'ocr' ? 'OCR (文字识别)' : result.provider;
+        const badgeHtml = result.fallback_used
+          ? `${providerLabel} · 已降级`
+          : providerLabel;
         setMessages(current =>
           current.map(item => {
             if (item.id === userMsgId) return { ...item, status: 'sent' as const, image_preview_url: imageUrl };
-            if (item.id === assistantMsgId) return { ...item, content: formatVisionResponse(result), status: 'sent' as const };
+            if (item.id === assistantMsgId) return {
+              ...item,
+              content: formatVisionResponse(result),
+              status: 'sent' as const,
+              character_name: `Vision · ${badgeHtml}`,
+            };
             return item;
           }),
         );
         setPendingVisionContext(buildVisionContext(result));
         setStatus('Ready');
+        setVisionLoading(false);
+        setLastVisionFile(null);
         notify('图片分析完成');
       } catch (nextError) {
         URL.revokeObjectURL(imageUrl);
         setPendingVisionContext(null);
-        const is501 = nextError instanceof ApiRequestError && nextError.status === 501;
-        const is413 = nextError instanceof ApiRequestError && nextError.status === 413;
-        const message = is413
-          ? '图片过大，请压缩后重试。'
-          : is501
-            ? '图片分析功能即将支持，敬请期待。'
-            : nextError instanceof ApiRequestError && (nextError.status === 502 || nextError.status === 503)
-              ? '图片分析暂时不可用，请稍后重试。'
-              : nextError instanceof Error ? nextError.message : '图片分析失败';
+        let message: string;
+        if (nextError instanceof ApiRequestError) {
+          message = getErrorMessage(nextError.status, nextError.message);
+        } else {
+          message = nextError instanceof Error ? nextError.message : '图片分析失败';
+        }
         setMessages(current =>
           current.map(item => {
             if (item.id === userMsgId) return { ...item, status: 'sent' as const };
-            if (item.id === assistantMsgId) return { ...item, content: message, status: 'sent' as const };
+            if (item.id === assistantMsgId) return {
+              ...item,
+              content: `${message}\n点击重试按钮可重新分析图片。`,
+              status: 'vision-error',
+            };
             return item;
           }),
         );
-        setStatus(is501 ? '图片分析即将支持' : '图片分析失败');
+        setStatus('图片分析失败');
+        setVisionLoading(false);
       } finally {
-        setStreaming(false);
+        if (!visionLoading) setStreaming(false);
+        else setStreaming(false);
       }
       return;
     }
@@ -622,6 +652,8 @@ export default function App() {
     let pendingId = `pending-${Date.now()}`;
     let streamConversationId = conversationId;
     let actualRouteMode = routeMode;
+    let chunkBuffer = '';
+    let rafPending = false;
     try {
       const visionCtx = pendingVisionContext;
       if (visionCtx) setPendingVisionContext(null);
@@ -647,25 +679,36 @@ export default function App() {
             refreshConversations();
           }
           if (event.type === 'chunk') {
-            setMessages(current => {
-              const pending = current.find(item => item.id === pendingId);
-              if (pending) {
-                return current.map(item => item.id === pendingId ? { ...item, content: item.content + event.delta } : item);
-              }
-              return [
-                ...current,
-                {
-                  id: pendingId,
-                  conversation_id: streamConversationId || 'pending',
-                  role: 'assistant',
-                  content: event.delta,
-                  route_mode: actualRouteMode,
-                  created_at: new Date().toISOString(),
-                  status: 'streaming',
-                  local: true,
-                },
-              ];
-            });
+            chunkBuffer += event.delta;
+            if (!rafPending) {
+              rafPending = true;
+              requestAnimationFrame(() => {
+                const delta = chunkBuffer;
+                chunkBuffer = '';
+                rafPending = false;
+                setMessages(current => {
+                  const pending = current.find(item => item.id === pendingId);
+                  if (pending) {
+                    return current.map(item =>
+                      item.id === pendingId ? { ...item, content: item.content + delta } : item,
+                    );
+                  }
+                  return [
+                    ...current,
+                    {
+                      id: pendingId,
+                      conversation_id: streamConversationId || 'pending',
+                      role: 'assistant',
+                      content: delta,
+                      route_mode: actualRouteMode,
+                      created_at: new Date().toISOString(),
+                      status: 'streaming',
+                      local: true,
+                    },
+                  ];
+                });
+              });
+            }
           }
           if (event.type === 'emotion') {
             setActiveEmotion(event.emotion);
@@ -718,7 +761,9 @@ export default function App() {
       setStatus('Ready');
       notify('Reply complete');
     } catch (nextError) {
-      const message = nextError instanceof Error ? nextError.message : 'Failed to send message';
+      const message = nextError instanceof ApiRequestError
+        ? getErrorMessage(nextError.status, nextError.message)
+        : nextError instanceof Error ? nextError.message : 'Failed to send message';
       setError(message);
       setStatus('Send failed');
       setMessages(current => current.map(item => item.id === pendingId ? { ...item, status: 'failed' } : item));
@@ -967,7 +1012,14 @@ export default function App() {
           </div>
         </header>
 
-        {error ? <div className="error-banner">{error}</div> : null}
+        {error ? (
+          <div className="error-banner">
+            <span>{error}</span>
+            <button type="button" className="error-dismiss-btn" onClick={() => setError(null)} aria-label="关闭">
+              ×
+            </button>
+          </div>
+        ) : null}
 
         <section className="conversation-pane">
           {conversationMode === 'work' ? (
@@ -979,7 +1031,13 @@ export default function App() {
           {conversationMode === 'night' ? (
             <div className="mode-hint-banner mode-hint-night">夜间模式：回复更轻柔，减少打扰</div>
           ) : null}
-          <MessageList messages={messages} />
+          {pendingVisionContext ? (
+            <div className="vision-context-chip">
+              <span>已分析图片，下次消息将携带视觉上下文</span>
+              <button type="button" onClick={clearPendingVisionContext} title="清除视觉上下文">×</button>
+            </div>
+          ) : null}
+          <MessageList messages={messages} onRetryVision={retryVisionImage} />
           <Composer
             disabled={streaming}
             routeMode={routeMode}

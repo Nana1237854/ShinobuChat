@@ -59,7 +59,7 @@ export type ApiMessage = {
 export type MessageOut = ApiMessage;
 
 export type ChatMessage = ApiMessage & {
-  status?: 'sending' | 'streaming' | 'sent' | 'failed';
+  status?: 'sending' | 'streaming' | 'sent' | 'failed' | 'vision-loading' | 'vision-error';
   local?: boolean;
   image_preview_url?: string | null;
   character_name?: string | null;

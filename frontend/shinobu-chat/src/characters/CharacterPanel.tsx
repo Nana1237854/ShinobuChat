@@ -205,9 +205,9 @@ export function CharacterPanel({
           ))}
         </div>
       ) : (
-        <p className="character-empty">
-          还没有辅助角色，添加一个来丰富对话体验。
-        </p>
+        <div className="character-empty">
+          <p>还没有辅助角色，添加一个来丰富对话体验。</p>
+        </div>
       )}
 
       {/* Character limit warning */}
