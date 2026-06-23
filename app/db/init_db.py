@@ -2,6 +2,7 @@ from sqlalchemy import text
 
 import app.models  # noqa: F401
 from app.core.config import settings
+from app.db.migrations import run_migrations
 from app.db.session import Base, engine
 
 
@@ -85,6 +86,7 @@ def init_db() -> None:
         with engine.begin() as connection:
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(bind=engine)
+    run_migrations()
     ensure_todos_columns()
     ensure_memory_columns()
     ensure_live2d_interactions_columns()

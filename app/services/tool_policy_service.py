@@ -14,17 +14,27 @@ _ALWAYS_DENIED: set[str] = {
     "browse_private",
 }
 
+# Tools whose group is EXPLICITLY declared here, bypassing keyword classification.
+# open_local_app MUST be listed here to avoid falling into the "unknown" group.
+_EXPLICIT_TOOL_GROUPS: dict[str, str] = {
+    "open_local_app": "local_app",
+}
+
 # Per-mode allowed tool groups (snake_case tool names map to groups).
 # Groups not listed for a mode are denied.
 _MODE_TOOL_GROUPS: dict[str, set[str]] = {
-    "companion": {"chat", "memory", "reminder", "emotion", "todo", "config_update", "unknown"},
-    "work": {"chat", "memory", "reminder", "todo", "goal", "web_search", "config_update", "unknown"},
-    "focus": {"todo", "goal", "reminder", "unknown"},
-    "night": {"chat", "reminder", "unknown"},
+    "companion": {"chat", "memory", "reminder", "emotion", "todo", "config_update", "local_app", "unknown"},
+    "work": {"chat", "memory", "reminder", "todo", "goal", "web_search", "config_update", "local_app", "unknown"},
+    "focus": {"todo", "goal", "reminder", "local_app", "unknown"},
+    "night": {"chat", "reminder", "local_app", "unknown"},
 }
 
 # Tool name → group mapping (simple keyword-based classification).
 def _classify_tool(tool_name: str) -> str:
+    # Explicit assignments take priority over keyword matching
+    if tool_name in _EXPLICIT_TOOL_GROUPS:
+        return _EXPLICIT_TOOL_GROUPS[tool_name]
+
     lowered = tool_name.lower().replace("_", "")
     if "todo" in lowered:
         return "todo"
@@ -101,6 +111,33 @@ class ToolPolicyService:
                 f"Tool policy denied: '{tool_name}' is active/soliciting, blocked in night mode",
                 checked_fields={**checked, "rule": "night_suppression"},
             )
+
+        # Rule 5: focus mode — restrict entertainment local_app intents
+        if conversation_mode == "focus" and group == "local_app":
+            intent = str(arguments.get("intent_type") or "").lower()
+            entertainment_intents = {"open_music"}
+            if intent in entertainment_intents:
+                return ToolPolicyDecision(
+                    False,
+                    f"Tool policy denied: '{tool_name}' intent_type='{intent}' is entertainment, "
+                    f"blocked in focus mode",
+                    checked_fields={**checked, "rule": "focus_entertainment_blocked", "intent_type": intent},
+                )
+
+        # Rule 6: night mode — local_app allowed but requires confirmation for entertainment
+        if conversation_mode == "night" and group == "local_app":
+            intent = str(arguments.get("intent_type") or "").lower()
+            if intent in {"open_music"}:
+                return ToolPolicyDecision(
+                    True,
+                    f"Tool policy allowed with confirmation: '{tool_name}' (group={group}) "
+                    f"in {conversation_mode} mode, entertainment intent requires confirmation",
+                    checked_fields={
+                        **checked, "rule": "allowed_with_confirmation",
+                        "tool_group": group, "intent_type": intent,
+                        "requires_confirmation": True,
+                    },
+                )
 
         return ToolPolicyDecision(
             True,

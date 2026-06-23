@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState, type MouseEvent } from 'react';
-import { BookOpen, Bot, Clock3, Cpu, Palette, Puzzle, Settings2, SunMoon, Users, X } from 'lucide-react';
+import { BookOpen, Bot, Clock3, Cpu, MonitorPlay, Palette, Puzzle, Settings2, SunMoon, Users, X } from 'lucide-react';
 import { CharacterEditor } from '../chat/CharacterEditor';
 import { PetSettingsPanel } from '../desktop-pet/PetSettingsPanel';
 import { GoalTrackerPanel } from '../goals/GoalTrackerPanel';
@@ -10,10 +10,11 @@ import type { BackgroundItem, CharacterProfile, Live2DModelItem, PetSettings } f
 import { ConfigPanel } from './ConfigPanel';
 import { PersonaSettingsPanel } from './PersonaSettingsPanel';
 import { SkillPanel } from './SkillPanel';
+import { LocalAppsPanel } from '../components/settings/LocalAppsPanel';
 import { ModeSwitch } from '../modes/ModeSwitch';
 import type { ConversationMode } from '../types';
 
-export type SettingsTab = 'appearance' | 'persona' | 'models' | 'skills' | 'memories' | 'goals' | 'mode' | 'diaries' | 'characters';
+export type SettingsTab = 'appearance' | 'persona' | 'models' | 'skills' | 'localApps' | 'memories' | 'goals' | 'mode' | 'diaries' | 'characters';
 
 type SettingsPageProps = {
   accessToken: string;
@@ -44,6 +45,7 @@ const tabs: TabDefinition[] = [
   { id: 'persona', label: '角色性格', note: '保留人设，微调表达', icon: Bot },
   { id: 'models', label: 'AI 模型', note: '模型、密钥与语音服务', icon: Cpu },
   { id: 'skills', label: '技能管理', note: '安装、编辑与启停 Skill', icon: Puzzle },
+  { id: 'localApps', label: '本地应用', note: '配置可调用的本地程序', icon: MonitorPlay },
   { id: 'memories', label: '记忆时间线', note: '搜索与回放长期记忆', icon: Settings2 },
   { id: 'goals', label: '长期目标', note: '陪伴式追踪与 check-in', icon: Clock3 },
   { id: 'mode', label: '情景模式', note: '切换陪伴 / 工作 / 专注 / 夜间', icon: SunMoon },
@@ -182,6 +184,7 @@ export function SettingsPage({
 
           {activeTab === 'models' ? <ConfigPanel accessToken={accessToken} /> : null}
           {activeTab === 'skills' ? <SkillPanel accessToken={accessToken} /> : null}
+          {activeTab === 'localApps' ? <LocalAppsPanel accessToken={accessToken} /> : null}
           {activeTab === 'memories' ? <MemoryTimelinePanel accessToken={accessToken} /> : null}
           {activeTab === 'goals' ? <GoalTrackerPanel accessToken={accessToken} onGoalsChanged={onGoalsChanged} /> : null}
           {activeTab === 'mode' ? (

@@ -35,6 +35,8 @@ import { analyzeImage } from './api/vision';
 import { listGoals } from './api/goals';
 import { subscribeReminderEvents } from './realtime/sseClient';
 import { captureScreen } from './media/screenshot';
+import { PendingActionCard } from './components/local-agent/PendingActionCard';
+import { ActionProgressPanel } from './components/local-agent/ActionProgressPanel';
 import {
   listConversations,
   listMessages,
@@ -56,6 +58,7 @@ import {
 } from './live2d/settings';
 import { getModePlaceholder, getModeStatusLabel } from './modes/ModeSwitch';
 import type {
+  ActionLogEntry,
   ApiMessage,
   AuthSession,
   AvatarTool,
@@ -67,6 +70,7 @@ import type {
   GoalItem,
   Live2DModelItem,
   MusicTrack,
+  PendingAction,
   PetSettings,
   ReminderEvent,
   RouteMode,
@@ -141,6 +145,9 @@ export default function App() {
   const [goalPreview, setGoalPreview] = useState<GoalItem[]>([]);
   const [reminderQueue, setReminderQueue] = useState<ReminderEvent[]>([]);
   const [reminderAction, setReminderAction] = useState<'snooze' | 'dismiss' | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [actionLogs, setActionLogs] = useState<ActionLogEntry[]>([]);
+  const [actionPanelExpanded, setActionPanelExpanded] = useState(false);
   const seenReminderIdsRef = useRef<Map<string, number>>(new Map());
   const audioCtxRef = useRef<AudioContext | null>(null);
   const audioNextRef = useRef(0);
@@ -729,6 +736,24 @@ export default function App() {
           if (event.type === 'progress') {
             setStatus(`${event.skillName}: ${event.message} (${Math.round(event.percent * 100)}%)`);
           }
+          if (event.type === 'pending_action') {
+            setPendingAction(event.pendingAction);
+            setStatus(`等待确认: ${event.pendingAction.description || event.pendingAction.display_name || ''}`);
+          }
+          if (event.type === 'action') {
+            setActionLogs(current => [
+              ...current,
+              {
+                timestamp: event.action.timestamp || new Date().toISOString(),
+                message: event.action.message,
+                status: event.action.status,
+                appKey: event.action.app_key ?? null,
+                displayName: event.action.display_name ?? null,
+              },
+            ]);
+            if (!actionPanelExpanded) setActionPanelExpanded(true);
+            setStatus(event.action.message);
+          }
           if (event.type === 'error') {
             setError(event.hint);
             setStatus('Action failed');
@@ -761,6 +786,9 @@ export default function App() {
             }
             if (event.emotionState) {
               applyEmotionState(event.emotionState);
+            }
+            if (event.pendingAction) {
+              setPendingAction(event.pendingAction);
             }
             refreshConversations();
           }
@@ -1045,7 +1073,21 @@ export default function App() {
               <button type="button" onClick={clearPendingVisionContext} title="清除视觉上下文">×</button>
             </div>
           ) : null}
+          {pendingAction && pendingAction.status === 'waiting_confirmation' ? (
+            <PendingActionCard
+              accessToken={session.accessToken}
+              action={pendingAction}
+              onResolved={() => setPendingAction(null)}
+            />
+          ) : null}
           <MessageList messages={messages} onRetryVision={retryVisionImage} />
+          {actionLogs.length > 0 ? (
+            <ActionProgressPanel
+              logs={actionLogs}
+              expanded={actionPanelExpanded}
+              onToggleExpand={() => setActionPanelExpanded(current => !current)}
+            />
+          ) : null}
           <Composer
             disabled={streaming}
             routeMode={routeMode}

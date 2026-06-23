@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1.routes import (
     auth,
+    browser,
     characters,
     conversations,
     config,
@@ -10,9 +11,11 @@ from app.api.v1.routes import (
     goals,
     interactions,
     live2d,
+    local_apps,
     memories,
     messages,
     modes,
+    pending_actions,
     persona,
     reminders,
     sync,
@@ -46,3 +49,6 @@ api_router.include_router(modes.router)
 api_router.include_router(vision.router)
 api_router.include_router(diaries.router)
 api_router.include_router(interactions.router)
+api_router.include_router(local_apps.router)
+api_router.include_router(pending_actions.router)
+api_router.include_router(browser.router)

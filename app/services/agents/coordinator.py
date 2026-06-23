@@ -16,6 +16,21 @@ from app.services.user_emotion_service import UserEmotionService
 
 
 @dataclass(frozen=True)
+class DirectActionPlan:
+    """A direct (non-AI) action triggered by QuickIntentRouter.
+
+    When set, the message pipeline executes the action immediately instead
+    of running through the AgentOrchestrator loop.
+    """
+
+    action: str  # "open_local_app"
+    intent_type: str
+    app_key: str | None = None
+    label: str = ""
+    confidence: float = 0.0
+
+
+@dataclass(frozen=True)
 class AgentPlan:
     route_mode: RouteMode
     router_decision: RouterDecision
@@ -23,6 +38,7 @@ class AgentPlan:
     messages: list[dict]
     progress_events: list[StreamEvent]
     conversation_mode: str = "companion"
+    direct_action: DirectActionPlan | None = None
 
 
 class AgentCoordinator:
@@ -51,6 +67,11 @@ class AgentCoordinator:
         conversation_id: uuid.UUID | None = None,
         vision_context: str | None = None,
     ) -> AgentPlan:
+        # Quick-intent detection (F12): check BEFORE RouterAgent for auto mode
+        direct_action: DirectActionPlan | None = None
+        if requested_route_mode is RouteMode.AUTO:
+            direct_action = self._check_quick_intent(content, user_id)
+
         decision = self.resolve_route(requested_route_mode, content, history)
         memory_context = self.memory_agent.search(user_id, content)
 
@@ -119,6 +140,7 @@ class AgentCoordinator:
             messages=messages,
             progress_events=progress_events,
             conversation_mode=conversation_mode,
+            direct_action=direct_action,
         )
 
     def resolve_route(
@@ -135,6 +157,44 @@ class AgentCoordinator:
         if continuation is not None:
             return continuation
         return self.router_agent.route(content)
+
+    @staticmethod
+    def _check_quick_intent(
+        content: str,
+        user_id: uuid.UUID,
+    ) -> DirectActionPlan | None:
+        """Run QuickIntentRouter (F12) to detect direct-action intents.
+
+        Only called when route_mode is AUTO. Returns a DirectActionPlan
+        if a high-confidence match is found, else None.
+        """
+        try:
+            from app.db.session import SessionLocal
+            from app.services.mode_service import ModeService
+            from app.services.quick_intent_router import QuickIntentRouter
+
+            db = SessionLocal()
+            try:
+                mode_svc = ModeService(db)
+                mode = mode_svc.get_mode(user_id)
+                conversation_mode = mode.value
+            finally:
+                db.close()
+
+            router = QuickIntentRouter()
+            decision = router.match(content, user_id, conversation_mode=conversation_mode)
+            if decision.matched and decision.requires_direct_action:
+                return DirectActionPlan(
+                    action="open_local_app",
+                    intent_type=decision.intent_type,
+                    label=decision.label,
+                    confidence=decision.confidence,
+                )
+        except Exception:
+            import logging
+            _logger_qi = logging.getLogger("shinobu.coordinator")
+            _logger_qi.debug("QuickIntentRouter check skipped (error)", exc_info=True)
+        return None
 
     def run_task(
         self,

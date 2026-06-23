@@ -116,6 +116,7 @@ export function normalizeStreamEvent(raw: RawSseEvent): StreamEvent | null {
         intensity?: number | null;
         reply_style_hint?: string | null;
       } | null;
+      pending_action?: Extract<StreamEvent, { type: 'done' }>['pendingAction'];
       assistant_message?: never;
     };
     return {
@@ -131,8 +132,20 @@ export function normalizeStreamEvent(raw: RawSseEvent): StreamEvent | null {
             },
           }
         : {}),
+      ...(payload.pending_action
+        ? { pendingAction: payload.pending_action }
+        : {}),
     };
   }
+  if (raw.eventName === 'pending_action') {
+    const payload = raw.payload as Extract<StreamEvent, { type: 'pending_action' }>['pendingAction'];
+    return { type: 'pending_action', pendingAction: payload };
+  }
+  if (raw.eventName === 'action') {
+    const payload = raw.payload as Extract<StreamEvent, { type: 'action' }>['action'];
+    return { type: 'action', action: payload };
+  }
+  // Unknown event types are silently ignored (no error)
   return null;
 }
 

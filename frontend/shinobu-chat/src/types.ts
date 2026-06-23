@@ -67,14 +67,126 @@ export type ChatMessage = ApiMessage & {
   is_auxiliary?: boolean;
 };
 
+// ── Local Agent: Local Apps ──
+
+export type IntentType =
+  | 'open_music'
+  | 'open_browser'
+  | 'open_ide'
+  | 'open_file_explorer'
+  | 'open_terminal'
+  | 'open_note_app'
+  | 'open_design_app'
+  | 'open_chat_app'
+  | 'open_custom';
+
+export const INTENT_TYPE_LABELS: Record<IntentType, string> = {
+  open_music: '打开音乐',
+  open_browser: '打开浏览器',
+  open_ide: '打开 IDE',
+  open_file_explorer: '打开文件管理器',
+  open_terminal: '打开终端',
+  open_note_app: '打开笔记应用',
+  open_design_app: '打开设计软件',
+  open_chat_app: '打开聊天软件',
+  open_custom: '自定义（仅手动打开）',
+};
+
+export type LocalApp = {
+  id: string;
+  user_id: string;
+  app_key: string;
+  intent_type: IntentType;
+  display_name: string;
+  executable_path: string;
+  working_dir?: string | null;
+  args?: string | null;
+  keywords: string[];
+  enabled: boolean;
+  is_default_for_intent: boolean;
+  confirm_required: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LocalAppCreateParams = {
+  app_key: string;
+  intent_type: IntentType;
+  display_name: string;
+  executable_path: string;
+  working_dir?: string | null;
+  args?: string | null;
+  keywords?: string[];
+  enabled?: boolean;
+  is_default_for_intent?: boolean;
+  confirm_required?: boolean;
+};
+
+export type LocalAppUpdateParams = Partial<LocalAppCreateParams>;
+
+export type LocalAppTestResult = {
+  success: boolean;
+  message: string;
+  exit_code?: number | null;
+};
+
+export type LocalAppOpenParams = {
+  app_key?: string | null;
+  intent_type?: IntentType | null;
+  reason?: string | null;
+};
+
+// ── Local Agent: Pending Actions ──
+
+export type PendingActionStatus = 'waiting_confirmation' | 'executing' | 'executed' | 'cancelled' | 'expired' | 'failed';
+
+export type PendingAction = {
+  id: string;
+  user_id: string;
+  conversation_id?: string | null;
+  action_type: string;
+  app_key?: string | null;
+  display_name?: string | null;
+  description: string;
+  status: PendingActionStatus;
+  expires_at?: string | null;
+  confirmed_at?: string | null;
+  cancelled_at?: string | null;
+  executed_at?: string | null;
+  result_message?: string | null;
+  created_at: string;
+};
+
+// ── Local Agent: Action Progress (for execution log) ──
+
+export type ActionProgress = {
+  task_id?: string | null;
+  action: string;
+  app_key?: string | null;
+  display_name?: string | null;
+  status: 'starting' | 'running' | 'completed' | 'failed' | 'cancelled';
+  message: string;
+  timestamp: string;
+};
+
+export type ActionLogEntry = {
+  timestamp: string;
+  message: string;
+  status: ActionProgress['status'];
+  appKey?: string | null;
+  displayName?: string | null;
+};
+
 export type StreamEvent =
   | { type: 'conversation'; conversationId: string; title: string; routeMode: RouteMode; userMessage: MessageOut }
   | { type: 'chunk'; delta: string }
   | { type: 'audio'; text: string; audio: string; emotion: string | null; emotionState?: EmotionState | null }
-  | { type: 'done'; assistantMessages: MessageOut[]; emotionState?: EmotionState | null }
+  | { type: 'done'; assistantMessages: MessageOut[]; emotionState?: EmotionState | null; pendingAction?: PendingAction | null }
   | { type: 'emotion'; emotion: string; emotionState?: EmotionState | null }
   | { type: 'progress'; skillName: string; message: string; percent: number }
-  | { type: 'error'; code: string; hint: string };
+  | { type: 'error'; code: string; hint: string }
+  | { type: 'pending_action'; pendingAction: PendingAction }
+  | { type: 'action'; action: ActionProgress };
 
 export type Live2DModelItem = {
   id: string;

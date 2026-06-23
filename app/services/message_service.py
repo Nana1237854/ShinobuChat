@@ -17,6 +17,7 @@ from app.schemas.message import MessageCreate, MessageRole, RouteMode
 from app.services.agent_orchestrator import AgentOrchestrator
 from app.services.agent_service import AgentService
 from app.services.agents import AgentCoordinator, MemoryAgent
+from app.services.agents.coordinator import DirectActionPlan
 from app.services.ai_client import AIClient
 from app.services.config_service import ConfigService
 from app.services.conversation_service import ConversationService
@@ -39,6 +40,7 @@ class MessageStreamState:
     progress_events: list[StreamEvent]
     reply_text: str
     conversation_mode: str = "companion"
+    direct_action: "DirectActionPlan | None" = None
 
 
 class MessageService:
@@ -88,6 +90,55 @@ class MessageService:
             "title": state.conversation.title,
             "user_message": self._serialize_message(state.user_message, emotion="neutral"),
         }))
+
+        # ── Direct action path (F12): QuickIntentRouter detected a local app intent ──
+        if state.direct_action is not None:
+            action_result, pending_info = await asyncio.to_thread(
+                self._execute_direct_action,
+                payload.user_id,
+                state,
+            )
+            yield self._format_event(StreamEvent("action", {
+                "action": state.direct_action.action,
+                "intent_type": state.direct_action.intent_type,
+                "status": action_result.get("status", "unknown"),
+                "message": action_result.get("message", ""),
+                "app_key": action_result.get("app_key"),
+                "display_name": action_result.get("display_name"),
+            }))
+            if pending_info:
+                yield self._format_event(StreamEvent("pending_action", pending_info))
+
+            # Build a friendly assistant reply for the direct action
+            full_reply = self._build_direct_action_reply(state.direct_action, action_result)
+            parsed_emotion, display_text = parse_emotion_tag(full_reply)
+            assistant_emotion = resolve_emotion(parsed_emotion)
+            state.reply_text = display_text
+            yield self._format_event(StreamEvent("emotion", {"emotion": assistant_emotion}))
+
+            direct_sentences = self._sentences_from_text(clean_tts_text(display_text))
+            if self.voice_service is not None and direct_sentences:
+                async for audio_event in self._stream_audio_sentences(
+                    direct_sentences, assistant_emotion, payload.content
+                ):
+                    yield audio_event
+            else:
+                for sentence in direct_sentences:
+                    yield self._format_event(StreamEvent("chunk", {"delta": sentence}))
+
+            assistant_messages = await asyncio.to_thread(self.save_sentences, state, direct_sentences)
+            done_payload: dict[str, object] = {
+                "conversation_id": str(state.conversation.id),
+                "assistant_messages": [
+                    self._serialize_message(message, emotion=assistant_emotion)
+                    for message in assistant_messages
+                ],
+            }
+            if pending_info:
+                done_payload["pending_action"] = pending_info
+            yield self._format_event(StreamEvent("done", done_payload))
+            self._schedule_memory_write(payload, state)
+            return
 
         history = await asyncio.to_thread(
             self.conversations.list_messages, state.conversation.id, payload.user_id
@@ -204,6 +255,7 @@ class MessageService:
             progress_events=agent_plan.progress_events,
             reply_text="",
             conversation_mode=agent_plan.conversation_mode,
+            direct_action=getattr(agent_plan, "direct_action", None),
         ), agent_plan.messages
 
     def save_sentences(self, state: MessageStreamState, sentences: list[str]) -> list[Message]:
@@ -362,6 +414,109 @@ class MessageService:
             "emotion": emotion,
             "created_at": message.created_at.isoformat(),
         }
+
+    # ------------------------------------------------------------------
+    # Direct action helpers (F12)
+    # ------------------------------------------------------------------
+
+    def _execute_direct_action(
+        self,
+        user_id,
+        state: MessageStreamState,
+    ) -> tuple[dict, dict | None]:
+        """Execute a DirectActionPlan via LocalAppService.
+
+        Returns (action_result, pending_info_or_none).
+        """
+        from app.db.session import SessionLocal
+        from app.services.local_app_service import LocalAppService
+
+        da = state.direct_action
+        db = SessionLocal()
+        try:
+            svc = LocalAppService(db)
+            result = svc.open_app(
+                user_id,
+                intent_type=da.intent_type,
+                app_key=da.app_key,
+                conversation_id=state.conversation.id,
+                source="quick_intent",
+            )
+            pending_info = None
+            if result.get("status") == "requires_confirmation":
+                pending_info = {
+                    "pending_action_id": result.get("pending_action_id"),
+                    "action_type": da.action,
+                    "app_key": result.get("app_key"),
+                    "display_name": result.get("display_name"),
+                    "intent_type": da.intent_type,
+                    "status": "waiting_confirmation",
+                }
+            return result, pending_info
+        finally:
+            db.close()
+
+    @staticmethod
+    def _build_direct_action_reply(
+        direct_action: "DirectActionPlan",
+        result: dict,
+    ) -> str:
+        """Build a friendly assistant message for the direct action result."""
+        status = result.get("status", "failed")
+        display_name = result.get("display_name", direct_action.intent_type)
+        if status == "opened":
+            return f"[happy]好的，已为你打开 {display_name}~"
+        elif status == "requires_confirmation":
+            return f"[thinking]{display_name} 需要确认才能打开哦，请确认一下~"
+        elif status == "not_configured":
+            return f"[neutral]我还没配置 {direct_action.intent_type} 对应的应用呢，去设置里绑定一下吧~"
+        elif status == "requires_selection":
+            return f"[thinking]有多个应用匹配 {direct_action.intent_type}，请在设置中选择一个默认应用~"
+        else:
+            return f"[neutral]抱歉，打开 {display_name} 失败了，可能是路径有问题，去检查一下吧~"
+
+    @staticmethod
+    def _sentences_from_text(text: str) -> list[str]:
+        """Split cleaned text into TTS-ready sentences."""
+        raw_sentences, remaining = split_sentences(text)
+        if remaining.strip():
+            raw_sentences.append(remaining.strip())
+        sentences: list[str] = []
+        for sentence in raw_sentences:
+            if len(sentence) > 40:
+                sentences.extend(split_long_sentence(sentence))
+            elif len(sentence) >= 2:
+                sentences.append(sentence)
+        return [s for s in sentences if len(s) >= 6]
+
+    async def _stream_audio_sentences(
+        self,
+        sentences: list[str],
+        emotion: str,
+        context_content: str,
+    ):
+        """Yield audio SSE events for each sentence, using VoiceService."""
+        processor = StreamProcessor(
+            voice_service=self.voice_service,
+            emotion=emotion,
+            context=[context_content],
+            sse=self.sse,
+        )
+        for sentence in sentences:
+            processor.res_queue.put_nowait(sentence)
+        processor.finish_text()
+
+        tts_task = asyncio.create_task(processor.run_tts())
+        try:
+            while True:
+                item = await processor.audio_queue.get()
+                if item == "__DONE__":
+                    break
+                if isinstance(item, dict):
+                    yield self._format_event(StreamEvent("audio", item))
+        finally:
+            processor.cancel()
+            await tts_task
 
     def _format_event(self, event: StreamEvent) -> str:
         return self.sse.encode(event)
