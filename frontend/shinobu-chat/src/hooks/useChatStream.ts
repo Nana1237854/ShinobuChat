@@ -140,17 +140,22 @@ export function useChatStream(deps: UseChatStreamDeps) {
               break;
 
             case 'action':
-              deps.setActionLogs(current => [
-                ...current,
-                {
-                  timestamp: event.action.timestamp || new Date().toISOString(),
-                  message: event.action.message,
-                  status: event.action.status,
-                  appKey: event.action.app_key ?? null,
-                  displayName: event.action.display_name ?? null,
-                },
-              ]);
-              deps.setActionPanelExpanded(true);
+              deps.setActionLogs(current => {
+                const wasEmpty = current.length === 0;
+                const next = [
+                  ...current,
+                  {
+                    timestamp: event.action.timestamp || new Date().toISOString(),
+                    message: event.action.message,
+                    status: event.action.status,
+                    appKey: event.action.app_key ?? null,
+                    displayName: event.action.display_name ?? null,
+                  },
+                ];
+                // Only auto-expand on first log; manual collapse is respected thereafter
+                if (wasEmpty) deps.setActionPanelExpanded(true);
+                return next;
+              });
               deps.setStatus(event.action.message);
               break;
 
@@ -161,7 +166,7 @@ export function useChatStream(deps: UseChatStreamDeps) {
 
             case 'error':
               deps.setError(event.hint);
-              deps.setStatus('Action failed');
+              deps.setStatus('AI service unavailable');
               break;
 
             case 'done':

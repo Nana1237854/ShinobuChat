@@ -45,20 +45,31 @@ class DirectActionRunner:
             result = svc.open_app(
                 user_id,
                 intent_type=da.intent_type,
-                app_key=da.app_key,
+                app_key=da.app_key or None,
+                app_name=getattr(da, "app_name", None) or None,
+                query=getattr(da, "query", None)
+                    or (state.user_message.content if state.user_message else None),
                 conversation_id=state.conversation.id,
                 source="quick_intent",
             )
 
+            pending_action_id = result.get("pending_action_id")
+
             pending_info = None
-            if result.get("status") == "requires_confirmation":
+            if result.get("status") == "requires_confirmation" and pending_action_id:
                 pending_info = {
-                    "pending_action_id": result.get("pending_action_id"),
+                    "id": pending_action_id,
+                    "pending_action_id": pending_action_id,
+                    "user_id": str(user_id),
+                    "conversation_id": str(state.conversation.id),
                     "action_type": da.action,
                     "app_key": result.get("app_key"),
                     "display_name": result.get("display_name"),
+                    "description": result.get("message") or f"{result.get('display_name') or result.get('app_key') or '应用'} 请求你的确认",
                     "intent_type": da.intent_type,
                     "status": "waiting_confirmation",
+                    "expires_at": result.get("expires_at"),
+                    "created_at": result.get("created_at"),
                 }
 
             return DirectActionResult(
@@ -72,14 +83,37 @@ class DirectActionRunner:
     @staticmethod
     def build_reply(da, result: dict) -> str:
         status = result.get("status", "failed")
-        display_name = result.get("display_name", da.intent_type)
+        display_name = result.get("display_name", "")
+        selection_message = result.get("selection_message") or ""
+        candidates = result.get("candidates")
+        intent_type = da.intent_type or ""
 
         if status == "opened":
             return f"[happy]好的，已为你打开 {display_name}~"
+
         if status == "requires_confirmation":
+            if selection_message:
+                return f"[thinking]{selection_message} {display_name} 需要确认才能打开，请确认一下~"
             return f"[thinking]{display_name} 需要确认才能打开哦，请确认一下~"
+
         if status == "not_configured":
-            return f"[neutral]我还没配置 {da.intent_type} 对应的应用呢，去设置里绑定一下吧~"
+            message = result.get("message", "")
+            if message:
+                return f"[neutral]{message}"
+            return f"[neutral]我还没配置 {intent_type} 对应的应用呢，去设置里绑定一下吧~"
+
         if status == "requires_selection":
-            return f"[thinking]有多个应用匹配 {da.intent_type}，请在设置中选择一个默认应用~"
-        return f"[neutral]抱歉，打开 {display_name} 失败了，可能是路径有问题，去检查一下吧~"
+            if candidates:
+                names = ", ".join(
+                    c.get("display_name", c.get("app_key", "")) for c in candidates
+                )
+                return f"[thinking]有多个应用匹配 {intent_type}，请在设置中选择一个默认应用，或者直接告诉我要打开 {names}。"
+            message = result.get("message", "")
+            if message:
+                return f"[thinking]{message}"
+            return f"[thinking]有多个应用匹配 {intent_type}，请在设置中选择一个默认应用~"
+
+        if status == "forbidden":
+            return f"[neutral]{result.get('message', 'Local Launcher 已关闭。')}"
+
+        return f"[neutral]抱歉，打开 {display_name or intent_type} 失败了，可能是路径有问题，去检查一下吧~"

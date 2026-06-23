@@ -59,6 +59,10 @@ export function PendingActionCard({ accessToken, action, onResolved }: PendingAc
   }, [action.status, onResolved]);
 
   const handleConfirm = async () => {
+    if (!action.id) {
+      setResultMessage('无法确认：缺少 pending action id');
+      return;
+    }
     setBusy(true);
     try {
       const result = await confirmPendingAction(accessToken, action.id);
@@ -71,6 +75,10 @@ export function PendingActionCard({ accessToken, action, onResolved }: PendingAc
   };
 
   const handleCancel = async () => {
+    if (!action.id) {
+      setResultMessage('无法取消：缺少 pending action id');
+      return;
+    }
     setBusy(true);
     try {
       await cancelPendingAction(accessToken, action.id);

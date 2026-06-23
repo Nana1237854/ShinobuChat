@@ -25,6 +25,21 @@ class UserConfigPatch(BaseModel):
     diary_enabled: bool | None = None
     auto_diary_enabled: bool | None = None
     auto_diary_timezone: str | None = None
+    # Embedding / memory retrieval
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
+    google_embedding_api_key: str | None = None
+    google_embedding_base_url: str | None = None
+    embedding_dimension: int | None = Field(default=None, ge=0, le=4096)
+    embedding_timeout_seconds: int | None = Field(default=None, ge=5, le=120)
+    embedding_top_k: int | None = Field(default=None, ge=1, le=10)
+    # Action reply personalization
+    action_reply_personalization_enabled: bool | None = None
+    action_reply_use_memory: bool | None = None
+    action_reply_use_diary: bool | None = None
+    action_reply_model: str | None = None
+    action_reply_max_tokens: int | None = Field(default=None, ge=64, le=2048)
+    action_reply_temperature: float | None = Field(default=None, ge=0, le=2)
 
 
 class UserConfigFieldOut(BaseModel):

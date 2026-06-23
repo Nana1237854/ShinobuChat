@@ -172,7 +172,7 @@ export type ActionProgress = {
 export type ActionLogEntry = {
   timestamp: string;
   message: string;
-  status: ActionProgress['status'];
+  status: string;
   appKey?: string | null;
   displayName?: string | null;
 };
@@ -279,6 +279,24 @@ export type ConfigUpdateRequest = Partial<{
   edge_tts_voice: string | null;
   asr_engine: string | null;
   whisper_api_key: string | null;
+  diary_enabled: boolean | null;
+  auto_diary_enabled: boolean | null;
+  auto_diary_timezone: string | null;
+  // Embedding / memory retrieval
+  embedding_provider: string | null;
+  embedding_model: string | null;
+  google_embedding_api_key: string | null;
+  google_embedding_base_url: string | null;
+  embedding_dimension: number | null;
+  embedding_timeout_seconds: number | null;
+  embedding_top_k: number | null;
+  // Action reply personalization
+  action_reply_personalization_enabled: boolean | null;
+  action_reply_use_memory: boolean | null;
+  action_reply_use_diary: boolean | null;
+  action_reply_model: string | null;
+  action_reply_max_tokens: number | null;
+  action_reply_temperature: number | null;
 }>;
 
 export type SkillSummary = Omit<UserSkill, 'content'>;

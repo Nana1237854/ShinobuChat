@@ -115,6 +115,11 @@ class AgentOrchestrator:
                     "Finalizing answer",
                     0.95,
                 )
+                # Emit pending_action if an open_local_app tool wrote one
+                # into context.metadata during this conversation step.
+                pending_action = context.metadata.get("pending_action")
+                if pending_action:
+                    yield StreamEvent("pending_action", pending_action)
                 if content:
                     yield StreamEvent("chunk", {"delta": content})
                 yield content
@@ -141,6 +146,11 @@ class AgentOrchestrator:
                     skill_name=tool_name,
                 )
                 result = self.tool_registry.execute_verified(tool_name, arguments, context)
+
+                # Emit action_log as SSE action event for frontend local-op log panel
+                action_log = context.metadata.pop("action_log", None)
+                if action_log:
+                    yield StreamEvent("action", action_log)
 
                 yield self._progress(
                     AgentRunState.VERIFYING,
@@ -178,6 +188,11 @@ class AgentOrchestrator:
                         "content": result.as_tool_message(),
                     }
                 )
+
+        # Emit pending_action in the step-limit case too
+        pending_action_b = context.metadata.get("pending_action")
+        if pending_action_b:
+            yield StreamEvent("pending_action", pending_action_b)
 
         fallback = "Agent step limit reached. Please narrow the task or add more specific context."
         yield StreamEvent("chunk", {"delta": fallback})

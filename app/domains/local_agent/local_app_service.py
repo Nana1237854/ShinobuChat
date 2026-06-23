@@ -108,15 +108,18 @@ class LocalAppService:
         *,
         app_key: str | None = None,
         intent_type: str | None = None,
+        app_name: str | None = None,
+        query: str | None = None,
         conversation_id: uuid.UUID | None = None,
         source: str = "api",
     ) -> dict[str, Any]:
         """Launch a local app.
 
         Resolution order:
-        1. If *app_key* is given, find by (user_id, app_key).
-        2. Else if *intent_type* is given, find the default app for that intent.
-        3. Otherwise return ``not_configured``.
+        1. app_key exact / case-insensitive match (highest priority)
+        2. app_name / query explicit name matching against app_key,
+           display_name, keywords
+        3. intent_type fallback (with default-for-intent preference)
 
         Returns a dict with keys:
         - status: opened | requires_confirmation | not_configured | requires_selection | failed
@@ -125,63 +128,23 @@ class LocalAppService:
         - pending_action_id (if status == requires_confirmation)
         - candidates (if status == requires_selection)
         - error_detail (if status == failed)
+        - selected_by, selection_message (when resolution involves choice)
         """
-        app: UserLocalApp | None = None
-
-        # ---- Resolve app ----
-        if app_key:
-            app = (
-                self.db.query(UserLocalApp)
-                .filter(
-                    and_(
-                        UserLocalApp.user_id == user_id,
-                        UserLocalApp.app_key == app_key,
-                        UserLocalApp.enabled.is_(True),
-                    )
-                )
-                .first()
-            )
-        elif intent_type:
-            apps = (
-                self.db.query(UserLocalApp)
-                .filter(
-                    and_(
-                        UserLocalApp.user_id == user_id,
-                        UserLocalApp.intent_type == intent_type,
-                        UserLocalApp.enabled.is_(True),
-                    )
-                )
-                .all()
-            )
-            if not apps:
-                return {
-                    "status": "not_configured",
-                    "message": f"No enabled app found for intent_type='{intent_type}'.",
-                }
-            if len(apps) == 1:
-                app = apps[0]
-            else:
-                # Multiple matches — prefer is_default_for_intent
-                defaults = [a for a in apps if a.is_default_for_intent]
-                if len(defaults) == 1:
-                    app = defaults[0]
-                else:
-                    return {
-                        "status": "requires_selection",
-                        "message": f"Multiple apps match intent_type='{intent_type}'. Please specify app_key.",
-                        "candidates": [_app_to_dict(a) for a in apps],
-                    }
-        else:
-            return {
-                "status": "not_configured",
-                "message": "Either app_key or intent_type must be provided.",
-            }
+        app, meta = self._resolve_app(
+            user_id,
+            app_key=app_key,
+            intent_type=intent_type,
+            app_name=app_name,
+            query=query,
+        )
 
         if app is None:
-            return {
-                "status": "not_configured",
-                "message": f"No enabled app found for app_key='{app_key}'.",
-            }
+            result: dict[str, Any] = dict(meta)
+            result.setdefault("status", "not_configured")
+            return result
+
+        selected_by = meta.get("selected_by", "")
+        selection_message = meta.get("selection_message") or None
 
         # ---- Validate path ----
         path_validation = _validate_executable(app.executable_path)
@@ -209,15 +172,175 @@ class LocalAppService:
             )
             return {
                 "status": "requires_confirmation",
-                "message": f"Opening '{app.display_name}' requires confirmation.",
+                "message": selection_message or f"Opening '{app.display_name}' requires confirmation.",
                 "app_key": app.app_key,
                 "display_name": app.display_name,
                 "executable_path": app.executable_path,
                 "pending_action_id": str(pending.id),
+                "expires_at": pending.expires_at.isoformat() if pending.expires_at else None,
+                "created_at": pending.created_at.isoformat() if pending.created_at else None,
+                "selected_by": selected_by,
+                "selection_message": selection_message,
             }
 
         # ---- Launch ----
-        return self._launch_and_log(user_id, conversation_id, app, source)
+        result = self._launch_and_log(user_id, conversation_id, app, source)
+        result["selected_by"] = selected_by
+        if selection_message:
+            result["selection_message"] = selection_message
+        return result
+
+    # ------------------------------------------------------------------
+    # App resolution
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_text(value: str | None) -> str:
+        return (value or "").strip().lower()
+
+    @staticmethod
+    def _app_matches_text(app: UserLocalApp, text: str) -> tuple[bool, int]:
+        """Check if *app* matches *text* and return (matched, score).
+
+        Higher score = stronger match. Only the best match should be used.
+        """
+        text_norm = LocalAppService._normalize_text(text)
+        if not text_norm:
+            return False, 0
+
+        app_key = LocalAppService._normalize_text(app.app_key)
+        display_name = LocalAppService._normalize_text(app.display_name)
+        keywords = [
+            LocalAppService._normalize_text(k)
+            for k in (app.keywords_json or [])
+        ]
+
+        if text_norm == app_key:
+            return True, 100
+        if text_norm == display_name:
+            return True, 95
+        if text_norm in keywords:
+            return True, 90
+        if display_name and display_name in text_norm:
+            return True, 80
+        if app_key and app_key in text_norm:
+            return True, 75
+        if any(k and k in text_norm for k in keywords):
+            return True, 70
+        if text_norm and display_name and text_norm in display_name:
+            return True, 60
+
+        return False, 0
+
+    def _resolve_app(
+        self,
+        user_id: uuid.UUID,
+        *,
+        app_key: str | None = None,
+        intent_type: str | None = None,
+        app_name: str | None = None,
+        query: str | None = None,
+    ) -> tuple[UserLocalApp | None, dict[str, Any]]:
+        """Resolve a user's local app by priority.
+
+        Returns (app, meta). When app is None, meta contains the error/status.
+        """
+        enabled_apps: list[UserLocalApp] = (
+            self.db.query(UserLocalApp)
+            .filter(
+                UserLocalApp.user_id == user_id,
+                UserLocalApp.enabled.is_(True),
+            )
+            .all()
+        )
+
+        # ── 1. app_key exact / case-insensitive match (highest priority) ──
+        if app_key:
+            app_key_norm = self._normalize_text(app_key)
+            for app in enabled_apps:
+                if self._normalize_text(app.app_key) == app_key_norm:
+                    return app, {
+                        "selected_by": "app_key",
+                        "selection_message": None,
+                    }
+
+        # ── 2. explicit app_name / query matching ──
+        explicit_texts: list[str] = []
+        if app_name:
+            explicit_texts.append(app_name)
+        if query and query != app_name:
+            explicit_texts.append(query)
+
+        for text in explicit_texts:
+            matches: list[tuple[int, UserLocalApp]] = []
+            for app in enabled_apps:
+                matched, score = self._app_matches_text(app, text)
+                if matched:
+                    matches.append((score, app))
+
+            if matches:
+                matches.sort(key=lambda item: item[0], reverse=True)
+                best_score, best_app = matches[0]
+                second_score = matches[1][0] if len(matches) > 1 else 0
+
+                # Clear winner when best_score > second_score
+                if best_score > second_score:
+                    return best_app, {
+                        "selected_by": "explicit_name",
+                        "selection_message": None,
+                    }
+
+                # Tie — return candidates
+                return None, {
+                    "status": "requires_selection",
+                    "message": "有多个应用都匹配你的描述，请在设置中选择默认应用，或说出更明确的应用名。",
+                    "candidates": [_app_to_dict(app) for _, app in matches],
+                }
+
+        # ── 3. intent_type fallback ──
+        if intent_type:
+            apps = [
+                app for app in enabled_apps if app.intent_type == intent_type
+            ]
+
+            if not apps:
+                return None, {
+                    "status": "not_configured",
+                    "message": f"我没有找到 {intent_type} 对应的已启用本地应用，请先在设置 → 本地应用中配置。",
+                }
+
+            if len(apps) == 1:
+                return apps[0], {
+                    "selected_by": "single_intent_match",
+                    "selection_message": None,
+                }
+
+            defaults = [a for a in apps if a.is_default_for_intent]
+            if len(defaults) == 1:
+                default_app = defaults[0]
+                return default_app, {
+                    "selected_by": "default_for_intent",
+                    "selection_message": f"有多个应用匹配 {intent_type}，我会选择默认应用 {default_app.display_name}。",
+                }
+
+            # Multiple apps, no default
+            return None, {
+                "status": "requires_selection",
+                "message": f"有多个应用匹配 {intent_type}，请在设置中选择一个默认应用，或者直接告诉我要打开具体哪一个。",
+                "candidates": [_app_to_dict(app) for app in apps],
+            }
+
+        # ── 4. Nothing provided ──
+        app_name_text = app_name or query
+        if app_name_text:
+            return None, {
+                "status": "not_configured",
+                "message": f"我没有找到名为“{app_name_text}”的已启用本地应用，请检查本地应用配置里的名称、关键词或 app_key。",
+            }
+        return None, {
+            "status": "not_configured",
+            "message": "Either app_key, app_name, query or intent_type must be provided.",
+        }
 
     def _launch_and_log(
         self,

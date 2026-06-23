@@ -25,6 +25,31 @@ export function parseRawSseEvent(rawEvent: string): RawSseEvent | null {
   };
 }
 
+export function normalizeActionLog(payload: any) {
+  if (!payload) return null;
+
+  return {
+    timestamp: payload.timestamp ?? payload.created_at ?? new Date().toISOString(),
+    message: payload.message ?? payload.result_message ?? '',
+    status: payload.status ?? 'unknown',
+    action: payload.action ?? payload.action_type ?? 'open_local_app',
+    app_key: payload.app_key ?? payload.appKey ?? null,
+    display_name: payload.display_name ?? payload.displayName ?? null,
+  };
+}
+
+export function normalizePendingAction(payload: any) {
+  if (!payload) return payload;
+  return {
+    ...payload,
+    id: payload.id ?? payload.pending_action_id,
+    description:
+      payload.description ??
+      payload.message ??
+      `${payload.display_name ?? payload.app_key ?? '应用'} 请求你的确认`,
+  };
+}
+
 export function normalizeStreamEvent(raw: RawSseEvent): StreamEvent | null {
   if (raw.eventName === 'conversation') {
     const payload = raw.payload as {
@@ -133,17 +158,17 @@ export function normalizeStreamEvent(raw: RawSseEvent): StreamEvent | null {
           }
         : {}),
       ...(payload.pending_action
-        ? { pendingAction: payload.pending_action }
+        ? { pendingAction: normalizePendingAction(payload.pending_action) }
         : {}),
     };
   }
   if (raw.eventName === 'pending_action') {
-    const payload = raw.payload as Extract<StreamEvent, { type: 'pending_action' }>['pendingAction'];
+    const payload = normalizePendingAction(raw.payload);
     return { type: 'pending_action', pendingAction: payload };
   }
   if (raw.eventName === 'action') {
-    const payload = raw.payload as Extract<StreamEvent, { type: 'action' }>['action'];
-    return { type: 'action', action: payload };
+    const action = normalizeActionLog(raw.payload);
+    return action ? { type: 'action', action } : null;
   }
   // Unknown event types are silently ignored (no error)
   return null;

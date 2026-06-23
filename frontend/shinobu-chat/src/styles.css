@@ -1831,13 +1831,16 @@ button:disabled {
 }
 
 .settings-toggle {
+  position: relative;
   width: 42px;
   height: 24px;
   flex: 0 0 auto;
   padding: 3px;
   border-radius: 999px;
+  border: none;
+  cursor: pointer;
   background: #c9d0dc;
-  transition: background-color 150ms ease;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
 .settings-toggle span {
@@ -1852,10 +1855,48 @@ button:disabled {
 
 .settings-toggle.is-on {
   background: #516fc3;
+  box-shadow: 0 0 0 3px rgba(81, 111, 195, 0.12);
 }
 
 .settings-toggle.is-on span {
   transform: translateX(18px);
+}
+
+.settings-toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.settings-toggle:disabled.is-on {
+  background: #516fc3;
+  opacity: 0.5;
+}
+
+.settings-toggle:focus-visible {
+  outline: 2px solid #516fc3;
+  outline-offset: 2px;
+}
+
+[data-theme="dark"] .settings-toggle {
+  background: #3a4050;
+}
+
+[data-theme="dark"] .settings-toggle.is-on {
+  background: #7b93d8;
+  box-shadow: 0 0 0 3px rgba(123, 147, 216, 0.15);
+}
+
+[data-theme="dark"] .settings-toggle span {
+  background: #e8ecf1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="dark"] .settings-toggle:disabled {
+  opacity: 0.4;
+}
+
+[data-theme="dark"] .settings-toggle:focus-visible {
+  outline-color: #7b93d8;
 }
 
 .settings-actions {
@@ -4303,137 +4344,221 @@ button:disabled {
 }
 
 /* ==========================================
-   F11-F13: Action Progress Panel
+   F11-F13: Action Progress Panel (collapsible log drawer)
    ========================================== */
 
 .action-progress-panel {
-  margin: 4px 14px 8px;
-  border: 1px solid rgba(91, 111, 145, 0.12);
-  border-radius: 9px;
-  background: var(--color-surface-solid);
+  margin: 8px 14px 0;
+  border: 1px solid rgba(91, 111, 145, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
   overflow: hidden;
+  flex-shrink: 0;
 }
 
-.action-progress-toggle {
+/* Collapsed: only the header shows */
+.action-progress-panel.is-collapsed {
+  height: auto;
+}
+
+/* Header bar — always visible when logs exist */
+.action-progress-header {
   width: 100%;
+  min-height: 32px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border: none;
-  background: transparent;
-  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.66);
+  color: #4b5870;
   font-size: 0.76rem;
   font-weight: 650;
   cursor: pointer;
   text-align: left;
 }
 
-.action-progress-toggle:hover {
-  background: rgba(91, 111, 145, 0.04);
+.action-progress-header:hover {
+  background: rgba(91, 111, 145, 0.06);
 }
 
-.action-progress-toggle-icon {
-  display: flex;
-  align-items: center;
+/* Chevron rotates when expanded */
+.action-progress-chevron {
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+  color: #7e8ca0;
 }
 
-.action-progress-toggle-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+.action-progress-chevron.is-open {
+  transform: rotate(180deg);
 }
 
+.action-progress-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #4b5870;
+  user-select: none;
+}
+
+/* Count badge */
 .action-progress-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-grid;
+  place-items: center;
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
   border-radius: 999px;
-  background: var(--color-primary-soft);
-  color: #36559f;
-  font-size: 0.66rem;
+  background: rgba(81, 111, 195, 0.12);
+  color: #3157a4;
+  font-size: 0.68rem;
   font-weight: 800;
+  user-select: none;
 }
 
+/* Subtle failed hint on header */
+.action-progress-panel.has-failed .action-progress-header {
+  border-left: 3px solid rgba(231, 76, 60, 0.45);
+}
+
+.action-progress-panel.has-failed .action-progress-count {
+  background: rgba(231, 76, 60, 0.12);
+  color: #d63031;
+}
+
+/* --- Log list (expanded) --- */
 .action-progress-log-list {
-  border-top: 1px solid rgba(91, 111, 145, 0.08);
-  max-height: 160px;
+  max-height: 128px;
   overflow-y: auto;
+  border-top: 1px solid rgba(91, 111, 145, 0.12);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(91, 111, 145, 0.2) transparent;
 }
 
-.action-progress-entry {
+/* Each log row: time | icon+target | message */
+.action-progress-log-row {
   display: grid;
-  grid-template-columns: 20px 70px 100px 1fr;
+  grid-template-columns: 66px minmax(84px, 140px) minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  padding: 5px 12px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-bottom: 1px solid rgba(91, 111, 145, 0.08);
   font-size: 0.72rem;
-  border-bottom: 1px solid rgba(91, 111, 145, 0.05);
 }
 
-.action-progress-entry:last-child {
-  border-bottom: none;
+.action-progress-log-row:last-child {
+  border-bottom: 0;
 }
 
-.action-progress-entry-icon {
-  display: flex;
-  align-items: center;
+/* Text truncation — all columns */
+.action-progress-time,
+.action-progress-target,
+.action-progress-message {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.action-progress-entry.status-starting .action-progress-entry-icon {
-  color: var(--color-warning);
-}
-
-.action-progress-entry.status-running .action-progress-entry-icon {
-  color: var(--color-primary);
-}
-
-.action-progress-entry.status-completed .action-progress-entry-icon {
-  color: var(--color-success);
-}
-
-.action-progress-entry.status-failed .action-progress-entry-icon,
-.action-progress-entry.status-cancelled .action-progress-entry-icon {
-  color: var(--color-error);
-}
-
-.action-progress-entry-time {
-  color: var(--color-text-subtle);
+.action-progress-time {
+  color: #6f7b91;
   font-family: var(--font-mono);
   font-size: 0.68rem;
 }
 
-.action-progress-entry-app {
-  color: #36559f;
-  font-weight: 650;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.action-progress-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #3157a4;
+  font-weight: 600;
 }
 
-.action-progress-entry-msg {
-  color: var(--color-text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.action-progress-message {
+  color: #5d687c;
 }
 
-/* Dark mode for action progress */
+/* Status-specific row colors */
+.action-progress-log-row.status-starting { border-left: 2px solid var(--color-warning); }
+.action-progress-log-row.status-running   { border-left: 2px solid var(--color-primary); }
+.action-progress-log-row.status-completed { border-left: 2px solid var(--color-success); }
+.action-progress-log-row.status-failed    { border-left: 2px solid var(--color-error); }
+.action-progress-log-row.status-cancelled { border-left: 2px solid var(--color-text-muted); }
+
+/* WebKit scrollbar styling */
+.action-progress-log-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.action-progress-log-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.action-progress-log-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(91, 111, 145, 0.26);
+}
+
+.action-progress-log-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(91, 111, 145, 0.42);
+}
+
+/* Dark mode */
 [data-theme="dark"] .action-progress-panel {
   background: rgba(17, 24, 39, 0.6);
+  border-color: rgba(91, 111, 145, 0.22);
 }
 
-/* Responsive for action progress */
+[data-theme="dark"] .action-progress-header {
+  background: rgba(17, 24, 39, 0.5);
+  color: #adbac7;
+}
+
+[data-theme="dark"] .action-progress-header:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="dark"] .action-progress-title {
+  color: #adbac7;
+}
+
+[data-theme="dark"] .action-progress-count {
+  background: rgba(81, 111, 195, 0.18);
+  color: #79a0ff;
+}
+
+[data-theme="dark"] .action-progress-time {
+  color: #768390;
+}
+
+[data-theme="dark"] .action-progress-target {
+  color: #79a0ff;
+}
+
+[data-theme="dark"] .action-progress-message {
+  color: #768390;
+}
+
+[data-theme="dark"] .action-progress-log-list {
+  border-top-color: rgba(91, 111, 145, 0.18);
+}
+
+[data-theme="dark"] .action-progress-log-row {
+  border-bottom-color: rgba(91, 111, 145, 0.1);
+}
+
+[data-theme="dark"] .action-progress-log-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* Responsive: smaller screens collapse to two columns */
 @media (max-width: 620px) {
-  .action-progress-entry {
-    grid-template-columns: 18px 1fr;
+  .action-progress-log-row {
+    grid-template-columns: auto 1fr;
+    gap: 6px;
   }
 
-  .action-progress-entry-time,
-  .action-progress-entry-app {
+  .action-progress-target {
     display: none;
   }
 }

@@ -263,6 +263,8 @@ def get_message_service(db: Session = Depends(get_db)) -> MessageService:
         get_memory_agent(),
         ConfigService(db),
         SkillManager(db),
+        memory_service=get_memory_service(),
+        diary_service=get_diary_service(db),
     )
 
 

@@ -367,6 +367,8 @@ export default function App() {
     setConversationId(null);
     localStorage.removeItem('shinobu-conversation-id');
     setMessages([]);
+    setActionLogs([]);
+    setActionPanelExpanded(false);
     setStatus('New conversation');
   };
 

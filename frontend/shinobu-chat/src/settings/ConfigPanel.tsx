@@ -85,6 +85,41 @@ const groups: ConfigGroup[] = [
       { key: 'whisper_api_key', label: 'Whisper API Key', description: '仅保存新输入值，不会回显完整密钥。', kind: 'secret' },
     ],
   },
+  {
+    title: 'Embedding / 记忆检索',
+    description: '用于记忆时间线、日记摘要和个性化回复的语义检索。关闭后将使用关键词和最近记录作为 fallback。',
+    fields: [
+      {
+        key: 'embedding_provider',
+        label: 'Embedding Provider',
+        description: '语义检索提供方。none 表示关闭，google 使用 Gemini Embedding。',
+        kind: 'select',
+        options: [
+          { value: 'none', label: 'none — 关闭' },
+          { value: 'google', label: 'google — Gemini Embedding' },
+          { value: 'local', label: 'local — 本地 TF-IDF（预留）' },
+        ],
+      },
+      { key: 'embedding_model', label: 'Embedding 模型', description: 'Embedding 模型名称，例如 gemini-embedding-001。', kind: 'text' },
+      { key: 'google_embedding_api_key', label: 'Google Embedding API Key', description: 'Google Embedding API Key。仅用于生成向量，始终脱敏。', kind: 'secret' },
+      { key: 'google_embedding_base_url', label: 'Google Embedding Base URL', description: '可选，留空使用默认地址。', kind: 'text' },
+      { key: 'embedding_dimension', label: 'Embedding Dimension', description: '向量维度。0 表示自动。', kind: 'number', min: 0, max: 4096, step: 64 },
+      { key: 'embedding_top_k', label: 'Embedding Top K', description: '动作回复和记忆检索时最多召回多少条相关记忆。', kind: 'number', min: 1, max: 10, step: 1 },
+      { key: 'embedding_timeout_seconds', label: 'Embedding Timeout（秒）', description: 'Embedding 请求超时时间。', kind: 'number', min: 5, max: 120, step: 5 },
+    ],
+  },
+  {
+    title: '动作回复 / Direct Action Reply',
+    description: '控制本地应用打开、确认、失败等动作结果是否使用模型生成更自然的人设化回复。',
+    fields: [
+      { key: 'action_reply_personalization_enabled', label: '启用人设化动作回复', description: '关闭后使用固定模板。', kind: 'boolean' },
+      { key: 'action_reply_use_memory', label: '动作回复参考记忆', description: '是否在动作回复中注入相关记忆时间线。', kind: 'boolean' },
+      { key: 'action_reply_use_diary', label: '动作回复参考日记', description: '是否在动作回复中注入最近日记摘要。', kind: 'boolean' },
+      { key: 'action_reply_model', label: '动作回复模型', description: 'Direct Action 回复专用模型。留空则复用主对话模型。', kind: 'text' },
+      { key: 'action_reply_max_tokens', label: '动作回复 Max Tokens', description: 'Direct Action 文案生成最大 token。', kind: 'number', min: 64, max: 2048, step: 64 },
+      { key: 'action_reply_temperature', label: '动作回复 Temperature', description: 'Direct Action 文案生成温度（0-2）。', kind: 'number', min: 0, max: 2, step: 0.1, withSlider: true },
+    ],
+  },
 ];
 
 function fieldsToValues(fields: ConfigField[]): Record<string, Scalar> {

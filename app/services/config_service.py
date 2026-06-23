@@ -46,6 +46,21 @@ CONFIG_SPECS: dict[str, ConfigSpec] = {
     "diary_enabled": ConfigSpec(bool),
     "auto_diary_enabled": ConfigSpec(bool),
     "auto_diary_timezone": ConfigSpec(str),
+    # Embedding / memory retrieval
+    "embedding_provider": ConfigSpec(str),
+    "embedding_model": ConfigSpec(str),
+    "google_embedding_api_key": ConfigSpec(str, True),
+    "google_embedding_base_url": ConfigSpec(str),
+    "embedding_dimension": ConfigSpec(int),
+    "embedding_timeout_seconds": ConfigSpec(int),
+    "embedding_top_k": ConfigSpec(int),
+    # Action reply personalization
+    "action_reply_personalization_enabled": ConfigSpec(bool),
+    "action_reply_use_memory": ConfigSpec(bool),
+    "action_reply_use_diary": ConfigSpec(bool),
+    "action_reply_model": ConfigSpec(str),
+    "action_reply_max_tokens": ConfigSpec(int),
+    "action_reply_temperature": ConfigSpec(float),
 }
 
 
@@ -182,7 +197,8 @@ class ConfigService:
         if not configured:
             logger.warning(
                 "SC_CONFIG_ENCRYPTION_KEY is not set. "
-                "Encrypted config fields (ai_api_key, ai_vision_api_key, google_search_api_key, whisper_api_key) "
+                "Encrypted config fields (ai_api_key, ai_vision_api_key, google_search_api_key, "
+                "whisper_api_key, google_embedding_api_key) "
                 "cannot be saved until a key is configured. "
                 "Set SC_CONFIG_ENCRYPTION_KEY in .env for production use."
             )

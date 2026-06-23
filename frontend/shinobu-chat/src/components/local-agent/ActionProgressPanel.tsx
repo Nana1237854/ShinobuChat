@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Clock3, Play, X, Check } from 'lucide-react';
+import { ChevronDown, Clock3, Play, X, Check } from 'lucide-react';
 import type { ActionLogEntry } from '../../types';
 
 type ActionProgressPanelProps = {
@@ -36,41 +36,46 @@ export function ActionProgressPanel({ logs, expanded: externalExpanded, onToggle
     }
   };
 
-  const recentLogs = expanded ? logs : logs.slice(-3);
-
   if (logs.length === 0) return null;
 
+  const lastFailed = logs[logs.length - 1]?.status === 'failed';
+
   return (
-    <div className="action-progress-panel" aria-label="本地操作执行进度">
-      <button type="button" className="action-progress-toggle" onClick={toggle}>
-        <span className="action-progress-toggle-icon">
-          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        </span>
-        <span className="action-progress-toggle-label">
-          本地操作日志
-          <span className="action-progress-count">{logs.length}</span>
-        </span>
+    <section
+      className={`action-progress-panel ${expanded ? 'is-expanded' : 'is-collapsed'}${lastFailed ? ' has-failed' : ''}`}
+      aria-label="本地操作执行进度"
+    >
+      <button
+        type="button"
+        className="action-progress-header"
+        onClick={toggle}
+        aria-expanded={expanded}
+      >
+        <ChevronDown
+          size={14}
+          className={`action-progress-chevron ${expanded ? 'is-open' : ''}`}
+        />
+        <span className="action-progress-title">本地操作日志</span>
+        <span className="action-progress-count">{logs.length}</span>
       </button>
 
       {expanded ? (
-        <div className="action-progress-log-list">
-          {recentLogs.map((entry, i) => {
+        <div className="action-progress-log-list" role="log">
+          {logs.map((entry, i) => {
             const Icon = statusIcons[entry.status] || Clock3;
             return (
               <div
                 key={`${entry.timestamp}-${i}`}
-                className={['action-progress-entry', `status-${entry.status}`].join(' ')}
+                className={`action-progress-log-row status-${entry.status}`}
               >
-                <span className="action-progress-entry-icon">
-                  <Icon size={13} />
-                </span>
-                <span className="action-progress-entry-time">
+                <span className="action-progress-time">
                   {formatTimestamp(entry.timestamp)}
                 </span>
-                <span className="action-progress-entry-app">
-                  {entry.displayName || entry.appKey || ''}
+                <span className="action-progress-target">
+                  <Icon size={11} />
+                  <span>{entry.displayName || entry.appKey || ''}</span>
                 </span>
-                <span className="action-progress-entry-msg">
+                <span className="action-progress-message">
                   {entry.message}
                 </span>
               </div>
@@ -78,6 +83,6 @@ export function ActionProgressPanel({ logs, expanded: externalExpanded, onToggle
           })}
         </div>
       ) : null}
-    </div>
+    </section>
   );
 }

@@ -8,6 +8,21 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.exceptions import UpstreamServiceError
+
+
+def _friendly_ai_error_hint(message: str) -> str:
+    lower = message.lower()
+
+    if "insufficient balance" in lower or "payment required" in lower or "402" in lower:
+        return "当前 AI 服务余额不足，暂时无法生成回复。请检查模型服务余额或更换可用 API Key。"
+
+    if "unauthorized" in lower or "invalid api key" in lower or "401" in lower:
+        return "当前 AI API Key 无效，请检查模型与服务配置。"
+
+    if "rate limit" in lower or "429" in lower:
+        return "当前 AI 服务请求过于频繁，请稍后再试。"
+
+    return "AI 服务暂时不可用，请稍后再试。"
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.schemas.message import MessageCreate, MessageRole, RouteMode
@@ -21,6 +36,7 @@ from app.services.skill_manager import SkillManager
 from app.services.skill_service import SkillRegistry
 from app.services.stream_events import SseEncoder, StreamEvent
 from app.services.turn.conversation_turn_service import ConversationTurnService
+from app.services.turn.action_reply_generation_service import ActionReplyGenerationService
 from app.services.turn.direct_action_runner import DirectActionRunner
 from app.services.turn.memory_write_scheduler import MemoryWriteScheduler
 from app.services.turn.reply_generation_service import ReplyGenerationService
@@ -47,6 +63,8 @@ class MessageService:
         memory_agent: MemoryAgent | None = None,
         config_service: ConfigService | None = None,
         skill_manager: SkillManager | None = None,
+        memory_service=None,
+        diary_service=None,
     ):
         self.db = db
         self.conversations = ConversationService(db)
@@ -77,6 +95,12 @@ class MessageService:
         self.direct_action_runner = DirectActionRunner()
         self.voice_reply_service = VoiceReplyService(voice_service, sse)
         self.memory_write_scheduler = MemoryWriteScheduler(memory_agent)
+        self.action_reply_generation_service = ActionReplyGenerationService(
+            ai_client=ai_client,
+            config_service=config_service,
+            memory_service=memory_service,
+            diary_service=diary_service,
+        )
 
     async def create_streaming_response(self, payload: MessageCreate):
         state, messages = await asyncio.to_thread(self.turn_service.prepare_turn, payload)
@@ -91,63 +115,86 @@ class MessageService:
             )
         )
 
-        # ── Direct action path (F12) ──
-        if state.direct_action is not None:
-            async for event in self._handle_direct_action(payload.user_id, state):
+        try:
+            # ── Direct action path (F12) ──
+            if state.direct_action is not None:
+                async for event in self._handle_direct_action(payload.user_id, state):
+                    yield self.event_service.format(event)
+                return
+
+            history = await asyncio.to_thread(
+                self.conversations.list_messages,
+                state.conversation.id,
+                payload.user_id,
+            )
+
+            full_reply = ""
+            agent_pending_action = None
+            for item in self.reply_generation_service.generate(
+                state=state,
+                messages=messages,
+                history=history[:-1],
+                user_id=payload.user_id,
+                ai_config=ai_config,
+                max_tokens=max_tokens,
+            ):
+                if isinstance(item, StreamEvent):
+                    if item.event == "pending_action" and item.payload:
+                        agent_pending_action = item.payload
+                    yield self.event_service.format(item)
+                else:
+                    full_reply = item
+
+            if not full_reply:
+                raise UpstreamServiceError("AI API returned an empty response")
+
+            parsed_emotion, display_text = parse_emotion_tag(full_reply)
+            assistant_emotion = resolve_emotion(parsed_emotion)
+            state.reply_text = display_text
+
+            yield self.event_service.format(
+                self.event_service.emotion(assistant_emotion)
+            )
+
+            async for event in self.voice_reply_service.stream_reply(
+                text=display_text,
+                emotion=assistant_emotion,
+                context_content=payload.content,
+            ):
                 yield self.event_service.format(event)
-            return
 
-        history = await asyncio.to_thread(
-            self.conversations.list_messages,
-            state.conversation.id,
-            payload.user_id,
-        )
+            sentences = self.voice_reply_service.split_for_voice(display_text)
 
-        full_reply = ""
-        for item in self.reply_generation_service.generate(
-            state=state,
-            messages=messages,
-            history=history[:-1],
-            user_id=payload.user_id,
-            ai_config=ai_config,
-            max_tokens=max_tokens,
-        ):
-            if isinstance(item, StreamEvent):
-                yield self.event_service.format(item)
-            else:
-                full_reply = item
+            assistant_messages = await asyncio.to_thread(
+                self.turn_service.save_assistant_sentences,
+                state,
+                sentences,
+            )
 
-        if not full_reply:
-            raise UpstreamServiceError("AI API returned an empty response")
+            yield self.event_service.format(
+                self.event_service.done(state, assistant_messages, assistant_emotion,
+                                        pending_action=agent_pending_action)
+            )
 
-        parsed_emotion, display_text = parse_emotion_tag(full_reply)
-        assistant_emotion = resolve_emotion(parsed_emotion)
-        state.reply_text = display_text
+            self.memory_write_scheduler.schedule_after_turn(payload, state)
 
-        yield self.event_service.format(
-            self.event_service.emotion(assistant_emotion)
-        )
+        except UpstreamServiceError as exc:
+            logger.warning("AI upstream failed during streaming response", exc_info=True)
+            yield self.event_service.format(
+                self.event_service.error(
+                    code="ai_upstream_error",
+                    hint=_friendly_ai_error_hint(str(exc)),
+                )
+            )
 
-        async for event in self.voice_reply_service.stream_reply(
-            text=display_text,
-            emotion=assistant_emotion,
-            context_content=payload.content,
-        ):
-            yield self.event_service.format(event)
-
-        sentences = self.voice_reply_service.split_for_voice(display_text)
-
-        assistant_messages = await asyncio.to_thread(
-            self.turn_service.save_assistant_sentences,
-            state,
-            sentences,
-        )
-
-        yield self.event_service.format(
-            self.event_service.done(state, assistant_messages, assistant_emotion)
-        )
-
-        self.memory_write_scheduler.schedule_after_turn(payload, state)
+        except Exception as exc:
+            logger.exception("Unexpected error during streaming response")
+            yield self.event_service.format(
+                self.event_service.error(
+                    code="stream_error",
+                    hint="回复生成时出了点问题，请稍后再试。",
+                )
+            )
 
     # ------------------------------------------------------------------
     # Direct action path
@@ -165,7 +212,26 @@ class MessageService:
         if result.pending_info:
             yield self.event_service.pending_action(result.pending_info)
 
-        full_reply = result.assistant_reply
+        # Generate companion-style reply via LLM, fall back to template on error
+        raw_reply = result.assistant_reply
+        display_reply = await asyncio.to_thread(
+            self.action_reply_generation_service.generate,
+            user_id=user_id,
+            user_text=state.user_message.content or "",
+            status=result.action_result.get("status", "failed"),
+            action_type=getattr(state.direct_action, "action", "open_local_app"),
+            intent_type=getattr(state.direct_action, "intent_type", None),
+            app_key=result.action_result.get("app_key"),
+            display_name=result.action_result.get("display_name"),
+            result_message=result.action_result.get("message"),
+            conversation_mode=getattr(state, "conversation_mode", "companion"),
+            selected_by=result.action_result.get("selected_by"),
+            selection_message=result.action_result.get("selection_message"),
+            candidates=result.action_result.get("candidates"),
+            requires_confirmation=result.action_result.get("status") == "requires_confirmation",
+            error_detail=result.action_result.get("error_detail"),
+        )
+        full_reply = display_reply or raw_reply
         parsed_emotion, display_text = parse_emotion_tag(full_reply)
         assistant_emotion = resolve_emotion(parsed_emotion)
         state.reply_text = display_text
@@ -193,13 +259,10 @@ class MessageService:
         )
         yield done_payload
 
-        self.memory_write_scheduler.schedule_after_turn(
-            MessageCreate(
-                user_id=user_id,
-                content="",
-                route_mode=state.route_mode,
-            ),
-            state,
+        self.memory_write_scheduler.schedule_after_turn_text(
+            user_id=user_id,
+            user_text=state.user_message.content,
+            state=state,
         )
 
     # ------------------------------------------------------------------

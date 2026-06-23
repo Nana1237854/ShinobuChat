@@ -94,13 +94,16 @@ export default function LocalAgentPermissionPanel({ accessToken }: Props) {
       </div>
       <div className="config-control">
         <button
-          className={`settings-toggle ${settings[keyName] ? 'active' : ''}`}
+          type="button"
+          className={`settings-toggle ${settings[keyName] ? 'is-on' : ''}`}
           onClick={() => toggle(keyName)}
           disabled={disabled}
-          aria-label={label}
+          aria-label={`${label}：${settings[keyName] ? '已开启' : '已关闭'}`}
           role="switch"
           aria-checked={settings[keyName]}
-        />
+        >
+          <span aria-hidden="true" />
+        </button>
       </div>
     </div>
   );

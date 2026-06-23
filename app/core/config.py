@@ -92,6 +92,23 @@ class Settings(BaseSettings):
     memory_embedding_api_key: str = Field(default="")
     memory_embedding_model: str = Field(default="text-embedding-3-small")
 
+    # Embedding / memory retrieval (per-user config)
+    embedding_provider: str = Field(default="none")
+    embedding_model: str = Field(default="gemini-embedding-001")
+    google_embedding_api_key: str = Field(default="")
+    google_embedding_base_url: str = Field(default="")
+    embedding_dimension: int = Field(default=0)
+    embedding_timeout_seconds: int = Field(default=30)
+    embedding_top_k: int = Field(default=3)
+
+    # Action reply personalization (per-user config)
+    action_reply_personalization_enabled: bool = Field(default=True)
+    action_reply_use_memory: bool = Field(default=True)
+    action_reply_use_diary: bool = Field(default=True)
+    action_reply_model: str = Field(default="")
+    action_reply_max_tokens: int = Field(default=300)
+    action_reply_temperature: float = Field(default=0.7)
+
     image_max_input_bytes: int = Field(default=41_943_040)
     image_max_output_bytes: int = Field(default=4_194_304)
     image_max_side: int = Field(default=3072)
