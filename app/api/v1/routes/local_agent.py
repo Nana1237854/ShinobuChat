@@ -2,26 +2,21 @@
 
 from __future__ import annotations
 
-import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_config_service, get_current_user_id
+from app.api.deps import get_current_user_id
 from app.db.session import get_db
 from app.models.local_action_log import LocalActionLog
-from app.models.user_config import UserConfig
 from app.schemas.local_agent_settings import (
     LocalAgentSettingsOut,
     LocalAgentSettingsPatch,
 )
-from app.services.config_service import ConfigService
+from app.services.local_agent_settings_service import LocalAgentSettingsService
 
 router = APIRouter(prefix="/local-agent", tags=["local-agent"])
-
-_SETTINGS_KEY = "local_agent_settings"
-_DEFAULTS = LocalAgentSettingsOut().model_dump()
 
 
 # ---------------------------------------------------------------------------
@@ -33,18 +28,7 @@ def get_local_agent_settings(
     user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> LocalAgentSettingsOut:
-    row = (
-        db.query(UserConfig)
-        .filter(UserConfig.user_id == user_id, UserConfig.field_name == _SETTINGS_KEY)
-        .first()
-    )
-    if row is None:
-        return LocalAgentSettingsOut()
-    try:
-        data = json.loads(row.field_value)
-    except (json.JSONDecodeError, TypeError):
-        return LocalAgentSettingsOut()
-    return LocalAgentSettingsOut(**{k: v for k, v in data.items() if k in _DEFAULTS})
+    return LocalAgentSettingsOut(**LocalAgentSettingsService(db).get_settings(user_id))
 
 
 @router.patch("/settings", response_model=LocalAgentSettingsOut)
@@ -53,37 +37,11 @@ def patch_local_agent_settings(
     user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> LocalAgentSettingsOut:
-    # Load current settings from DB
-    row = (
-        db.query(UserConfig)
-        .filter(UserConfig.user_id == user_id, UserConfig.field_name == _SETTINGS_KEY)
-        .first()
+    data = LocalAgentSettingsService(db).save_settings(
+        user_id,
+        patch.model_dump(exclude_unset=True),
     )
-    if row is not None:
-        try:
-            current = json.loads(row.field_value)
-        except (json.JSONDecodeError, TypeError):
-            current = dict(_DEFAULTS)
-    else:
-        current = dict(_DEFAULTS)
-
-    for key, value in patch.model_dump(exclude_unset=True).items():
-        if value is not None:
-            current[key] = value
-
-    serialized = json.dumps(current, ensure_ascii=False)
-    if row is None:
-        row = UserConfig(
-            user_id=user_id,
-            field_name=_SETTINGS_KEY,
-            field_value=serialized,
-            encrypted=False,
-        )
-    else:
-        row.field_value = serialized
-    db.add(row)
-    db.commit()
-    return LocalAgentSettingsOut(**current)
+    return LocalAgentSettingsOut(**data)
 
 
 # ---------------------------------------------------------------------------

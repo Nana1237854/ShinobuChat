@@ -8,6 +8,7 @@ from uuid import UUID
 from app.core.config import settings
 from app.models.message import Message
 from app.services.agent_service import AgentService
+from app.services.agent_run_state import AgentRunState
 from app.services.ai_client import AIClient
 from app.services.skill_service import Skill
 from app.services.stream_events import StreamEvent
@@ -53,6 +54,20 @@ class AgentOrchestrator:
                 verified.checked_fields,
             )
 
+    @staticmethod
+    def _progress(
+        state: AgentRunState,
+        message: str,
+        percent: float,
+        skill_name: str = "agent",
+    ) -> StreamEvent:
+        return StreamEvent("progress", {
+            "skill_name": skill_name,
+            "message": message,
+            "percent": percent,
+            "state": state.value,
+        })
+
     def run(
         self,
         messages: list[dict],
@@ -77,13 +92,10 @@ class AgentOrchestrator:
             conversation_id=conversation_id,
         )
         for step in range(max(settings.agent_max_steps, 1)):
-            yield StreamEvent(
-                "progress",
-                {
-                    "skill_name": "agent",
-                    "message": f"Thinking step {step + 1}",
-                    "percent": min(0.25 + step * 0.1, 0.85),
-                },
+            yield self._progress(
+                AgentRunState.PLANNING,
+                f"Planning step {step + 1}",
+                percent=min(0.25 + step * 0.1, 0.85),
             )
             assistant_message = self.ai_client.complete_chat(
                 messages,
@@ -98,10 +110,21 @@ class AgentOrchestrator:
             tool_calls = assistant_message.get("tool_calls") or []
             content = assistant_message.get("content") or ""
             if not tool_calls:
+                yield self._progress(
+                    AgentRunState.FINALIZING,
+                    "Finalizing answer",
+                    0.95,
+                )
                 if content:
                     yield StreamEvent("chunk", {"delta": content})
                 yield content
                 return
+
+            yield self._progress(
+                AgentRunState.TOOL_SELECTING,
+                f"Selected {len(tool_calls)} tool call(s)",
+                0.35,
+            )
 
             messages.append(assistant_message)
             for tool_call in tool_calls:
@@ -111,15 +134,20 @@ class AgentOrchestrator:
                     arguments = json.loads(function.get("arguments") or "{}")
                 except json.JSONDecodeError:
                     arguments = {}
-                yield StreamEvent(
-                    "progress",
-                    {
-                        "skill_name": tool_name,
-                        "message": "Running tool",
-                        "percent": min(0.35 + step * 0.1, 0.9),
-                    },
+                yield self._progress(
+                    AgentRunState.TOOL_EXECUTING,
+                    f"Running tool: {tool_name}",
+                    0.55,
+                    skill_name=tool_name,
                 )
                 result = self.tool_registry.execute_verified(tool_name, arguments, context)
+
+                yield self._progress(
+                    AgentRunState.VERIFYING,
+                    f"Verifying tool result: {tool_name}",
+                    0.7,
+                    skill_name=tool_name,
+                )
 
                 # Log and handle verification result (single verification path)
                 self.verify_step(tool_name, result)
@@ -131,6 +159,7 @@ class AgentOrchestrator:
                             "code": "TOOL_VERIFICATION_FAILED",
                             "hint": f"{tool_name}: {result.reason}",
                             "checked_fields": result.checked_fields,
+                            "state": AgentRunState.FAILED.value,
                         },
                     )
                     yield StreamEvent(

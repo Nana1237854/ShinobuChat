@@ -87,6 +87,35 @@ class LocalAgentSettingsService:
                 "MCP 集成默认关闭。请在设置 → 权限中心中开启后再试。"
             )
 
+    def save_settings(self, user_id: UUID, patch: dict) -> dict:
+        """Merge *patch* into current settings and persist. Returns merged dict."""
+        current = self.get_settings(user_id)
+        for key, value in patch.items():
+            if key in _DEFAULTS and value is not None:
+                current[key] = value
+
+        serialized = json.dumps(current, ensure_ascii=False)
+
+        row = (
+            self._db.query(UserConfig)
+            .filter(UserConfig.user_id == user_id, UserConfig.field_name == _SETTINGS_KEY)
+            .first()
+        )
+
+        if row is None:
+            row = UserConfig(
+                user_id=user_id,
+                field_name=_SETTINGS_KEY,
+                field_value=serialized,
+                encrypted=False,
+            )
+        else:
+            row.field_value = serialized
+
+        self._db.add(row)
+        self._db.commit()
+        return current
+
     def is_local_launcher_enabled(self, user_id: UUID) -> bool:
         return self.get_settings(user_id).get("local_launcher_enabled", True)
 

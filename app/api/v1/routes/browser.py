@@ -13,11 +13,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_config_service, get_current_user_id
-from app.core.time import local_now
 from app.db.session import get_db
-from app.models.browser_action_log import BrowserActionLog
-from app.services.local_agent_settings_service import LocalAgentSettingsService
-from app.models.trusted_download_source import TrustedDownloadSource
 from app.schemas.browser import (
     BrowserActionLogItem,
     BrowserActionLogsResponse,
@@ -39,13 +35,10 @@ from app.schemas.browser import (
     TrustedSourceItem,
     TrustedSourceListResponse,
 )
-from app.services.browser_automation_service import BrowserAutomationService
+from app.services.browser.browser_facade_service import BrowserFacadeService
+from app.services.browser.browser_action_log_service import BrowserActionLogService
+from app.services.browser.trusted_download_source_service import TrustedDownloadSourceService
 from app.services.config_service import ConfigService
-from app.services.download_service import DownloadService
-from app.services.http_client import UrllibHttpClient
-from app.services.web_reader_service import WebReaderService
-from app.services.web_search_service import WebSearchService
-from app.services.web_summarizer_service import WebSummarizerService
 
 router = APIRouter(prefix="/browser", tags=["browser"])
 
@@ -61,12 +54,7 @@ def browser_search(
     config_service: ConfigService = Depends(get_config_service),
     db: Session = Depends(get_db),
 ) -> BrowserSearchResponse:
-    LocalAgentSettingsService(db).ensure_browser_reader_enabled(user_id)
-    api_key = config_service.get_effective_value(user_id, "google_search_api_key") or ""
-    cx = config_service.get_effective_value(user_id, "google_search_cx") or ""
-
-    svc = WebSearchService(api_key=api_key, cx=cx)
-    result = svc.search(body.query, user_id=user_id, max_results=body.max_results)
+    result = BrowserFacadeService(db, config_service).search(user_id, body.query, body.max_results)
     return BrowserSearchResponse(**result)
 
 
@@ -78,16 +66,10 @@ def browser_search(
 def browser_read(
     body: BrowserReadRequest,
     user_id: UUID = Depends(get_current_user_id),
+    config_service: ConfigService = Depends(get_config_service),
     db: Session = Depends(get_db),
 ) -> BrowserReadResponse:
-    LocalAgentSettingsService(db).ensure_browser_reader_enabled(user_id)
-    svc = WebReaderService()
-    result = svc.read(body.url, user_id=user_id, max_chars=body.max_chars)
-    _log_browser_action(
-        db, user_id, "browser_read", body.url,
-        status=result.get("status", "error"),
-        message=result.get("message", ""),
-    )
+    result = BrowserFacadeService(db, config_service).read(user_id, body.url, body.max_chars)
     return BrowserReadResponse(**result)
 
 
@@ -102,20 +84,8 @@ def browser_summarize(
     config_service: ConfigService = Depends(get_config_service),
     db: Session = Depends(get_db),
 ) -> BrowserSummarizeResponse:
-    LocalAgentSettingsService(db).ensure_browser_reader_enabled(user_id)
-    from app.services.ai_client import AIClient
-
-    runtime = config_service.resolve_runtime(user_id)
-    ai_client = AIClient()
-    svc = WebSummarizerService(ai_client=ai_client)
-    result = svc.summarize(
-        body.url, user_id=user_id, question=body.question, max_chars=body.max_chars,
-        runtime_config=runtime,
-    )
-    _log_browser_action(
-        db, user_id, "browser_summarize", body.url,
-        status=result.get("status", "error"),
-        message=result.get("message", ""),
+    result = BrowserFacadeService(db, config_service).summarize(
+        user_id, body.url, body.question, body.max_chars,
     )
     return BrowserSummarizeResponse(**result)
 
@@ -128,16 +98,10 @@ def browser_summarize(
 def browser_open_url(
     body: BrowserOpenUrlRequest,
     user_id: UUID = Depends(get_current_user_id),
+    config_service: ConfigService = Depends(get_config_service),
     db: Session = Depends(get_db),
 ) -> BrowserOpenUrlResponse:
-    LocalAgentSettingsService(db).ensure_browser_reader_enabled(user_id)
-    svc = BrowserAutomationService()
-    result = svc.open_url(body.url, user_id=user_id)
-    _log_browser_action(
-        db, user_id, "browser_open_url", body.url,
-        status=result.get("status", "error"),
-        message=result.get("message", ""),
-    )
+    result = BrowserFacadeService(db, config_service).open_url(user_id, body.url)
     return BrowserOpenUrlResponse(**result)
 
 
@@ -149,16 +113,10 @@ def browser_open_url(
 def extract_download_candidates(
     body: ExtractDownloadCandidatesRequest,
     user_id: UUID = Depends(get_current_user_id),
+    config_service: ConfigService = Depends(get_config_service),
     db: Session = Depends(get_db),
 ) -> ExtractDownloadCandidatesResponse:
-    LocalAgentSettingsService(db).ensure_browser_reader_enabled(user_id)
-    svc = DownloadService(db)
-    result = svc.extract_candidates(body.url, user_id=user_id)
-    _log_browser_action(
-        db, user_id, "extract_download_candidates", body.url,
-        status=result.get("status", "error"),
-        message=result.get("message", ""),
-    )
+    result = BrowserFacadeService(db, config_service).extract_download_candidates(user_id, body.url)
     return ExtractDownloadCandidatesResponse(**result)
 
 
@@ -170,17 +128,11 @@ def extract_download_candidates(
 def classify_downloads(
     body: ClassifyDownloadRequest,
     user_id: UUID = Depends(get_current_user_id),
+    config_service: ConfigService = Depends(get_config_service),
     db: Session = Depends(get_db),
 ) -> ClassifyDownloadResponse:
-    LocalAgentSettingsService(db).ensure_browser_reader_enabled(user_id)
-    svc = DownloadService(db)
     candidates = [c.model_dump() for c in body.candidates]
-    result = svc.classify(candidates)
-    _log_browser_action(
-        db, user_id, "classify_downloads", "",
-        status=result.get("status", "error"),
-        message=result.get("message", ""),
-    )
+    result = BrowserFacadeService(db, config_service).classify_downloads(user_id, candidates)
     return ClassifyDownloadResponse(**result)
 
 
@@ -193,15 +145,8 @@ def list_trusted_sources(
     user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> TrustedSourceListResponse:
-    rows = (
-        db.query(TrustedDownloadSource)
-        .filter(
-            (TrustedDownloadSource.user_id == user_id)
-            | (TrustedDownloadSource.user_id.is_(None))
-        )
-        .order_by(TrustedDownloadSource.domain)
-        .all()
-    )
+    svc = TrustedDownloadSourceService(db)
+    rows = svc.list_sources(user_id)
     return TrustedSourceListResponse(
         sources=[TrustedSourceItem.model_validate(r) for r in rows]
     )
@@ -213,17 +158,14 @@ def add_trusted_source(
     user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ) -> TrustedSourceItem:
-    source = TrustedDownloadSource(
+    svc = TrustedDownloadSourceService(db)
+    source = svc.create_source(
         user_id=user_id,
         domain=body.domain,
         product_key=body.product_key,
         trust_level=body.trust_level,
-        source_type="user",
         note=body.note,
     )
-    db.add(source)
-    db.commit()
-    db.refresh(source)
     return TrustedSourceItem.model_validate(source)
 
 
@@ -240,44 +182,8 @@ def get_browser_action_logs(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ) -> BrowserActionLogsResponse:
-    q = (
-        db.query(BrowserActionLog)
-        .filter(BrowserActionLog.user_id == user_id)
-    )
-    if action_type:
-        q = q.filter(BrowserActionLog.action_type == action_type)
-    if status:
-        q = q.filter(BrowserActionLog.status == status)
-    q = q.order_by(BrowserActionLog.created_at.desc()).offset(offset).limit(limit)
-    rows = q.all()
+    svc = BrowserActionLogService(db)
+    rows = svc.list_logs(user_id, action_type=action_type, status=status, limit=limit, offset=offset)
     return BrowserActionLogsResponse(
         logs=[BrowserActionLogItem.model_validate(r) for r in rows]
     )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _log_browser_action(
-    db: Session,
-    user_id: UUID,
-    action_type: str,
-    target_url: str,
-    status: str = "started",
-    message: str | None = None,
-    error_detail: str | None = None,
-) -> BrowserActionLog:
-    log = BrowserActionLog(
-        user_id=user_id,
-        action_type=action_type,
-        target_url=target_url or None,
-        status=status,
-        message=message,
-        error_detail=error_detail,
-        payload_json={},
-        finished_at=local_now() if status in ("ok", "error", "failed") else None,
-    )
-    db.add(log)
-    db.commit()
-    return log

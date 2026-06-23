@@ -1,4 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useChatStream } from './hooks/useChatStream';
 import {
   Bot,
   ChevronLeft,
@@ -121,9 +122,9 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [routeMode, setRouteMode] = useState<RouteMode>(() => (localStorage.getItem('shinobu-route-mode') as RouteMode) || 'auto');
   const [conversationMode, setConversationMode] = useState<ConversationMode | null>(null);
+  const [status, setStatus] = useState('Ready');
   const [streaming, setStreaming] = useState(false);
   const streamingRef = useRef(streaming);
-  const [status, setStatus] = useState('Ready');
   const [error, setError] = useState<string | null>(null);
   const [models, setModels] = useState<Live2DModelItem[]>([]);
   const [backgrounds, setBackgrounds] = useState<BackgroundItem[]>([]);
@@ -271,10 +272,6 @@ export default function App() {
   useEffect(() => {
     savePetSettings(petSettings);
   }, [petSettings]);
-
-  useEffect(() => {
-    streamingRef.current = streaming;
-  }, [streaming]);
 
   useEffect(() => {
     localStorage.setItem('shinobu-route-mode', routeMode);
@@ -507,6 +504,37 @@ export default function App() {
     }
   }, []);
 
+  // ── useChatStream hook (placed after deps are defined) ──
+  const { sendText: hookSendText } = useChatStream(
+    useMemo(() => ({
+      session,
+      conversationId,
+      routeMode,
+      pendingVisionContext,
+      setConversationId,
+      setMessages,
+      setError,
+      setStatus,
+      setPendingVisionContext,
+      setPendingAction,
+      setActiveEmotion,
+      setActionLogs,
+      setActionPanelExpanded,
+      refreshConversations,
+      notify,
+      applyEmotionState,
+      toChatMessage,
+    }), [
+      session,
+      conversationId,
+      routeMode,
+      pendingVisionContext,
+      refreshConversations,
+      notify,
+      applyEmotionState,
+    ]),
+  );
+
   const updateAvatarEmotion = (message?: ApiMessage | null) => {
     if (message?.emotion) {
       setActiveEmotion(message.emotion);
@@ -563,12 +591,18 @@ export default function App() {
 
   const sendText = async (text: string, imageFile?: File) => {
     if (!session || streaming) return;
-    setStreaming(true);
     setError(null);
     setEmotionState(null);
 
-    if (imageFile) {
-      setLastVisionFile(imageFile);
+    // Delegate text-only path to useChatStream hook
+    if (!imageFile) {
+      hookSendText(text);
+      return;
+    }
+
+    // ── Image handling (kept in App.tsx) ──
+    setStreaming(true);
+    setLastVisionFile(imageFile);
       const imageUrl = URL.createObjectURL(imageFile);
       const userMsgId = `user-img-${Date.now()}`;
       const assistantMsgId = `vision-${Date.now()}`;
@@ -658,155 +692,9 @@ export default function App() {
         else setStreaming(false);
       }
       return;
-    }
-
-    const content = text.trim();
-    if (!content) { setStreaming(false); return; }
-    setStatus('Shinobu is replying...');
-
-    let pendingId = `pending-${Date.now()}`;
-    let streamConversationId = conversationId;
-    let actualRouteMode = routeMode;
-    let chunkBuffer = '';
-    let rafPending = false;
-    try {
-      const visionCtx = pendingVisionContext;
-      if (visionCtx) setPendingVisionContext(null);
-
-      await sendMessageStream({
-        userId: session.userId,
-        conversationId,
-        content,
-        routeMode,
-        accessToken: session.accessToken,
-        visionContext: visionCtx,
-        onEvent: event => {
-          if (event.type === 'conversation') {
-            streamConversationId = event.conversationId;
-            actualRouteMode = event.routeMode;
-            setConversationId(event.conversationId);
-            localStorage.setItem('shinobu-conversation-id', event.conversationId);
-            setMessages(current => {
-              const exists = current.some(item => item.id === event.userMessage.id);
-              return exists ? current : [...current, toChatMessage(event.userMessage)];
-            });
-            updateAvatarEmotion(event.userMessage);
-            refreshConversations();
-          }
-          if (event.type === 'chunk') {
-            chunkBuffer += event.delta;
-            if (!rafPending) {
-              rafPending = true;
-              requestAnimationFrame(() => {
-                const delta = chunkBuffer;
-                chunkBuffer = '';
-                rafPending = false;
-                setMessages(current => {
-                  const pending = current.find(item => item.id === pendingId);
-                  if (pending) {
-                    return current.map(item =>
-                      item.id === pendingId ? { ...item, content: item.content + delta } : item,
-                    );
-                  }
-                  return [
-                    ...current,
-                    {
-                      id: pendingId,
-                      conversation_id: streamConversationId || 'pending',
-                      role: 'assistant',
-                      content: delta,
-                      route_mode: actualRouteMode,
-                      created_at: new Date().toISOString(),
-                      status: 'streaming',
-                      local: true,
-                    },
-                  ];
-                });
-              });
-            }
-          }
-          if (event.type === 'emotion') {
-            setActiveEmotion(event.emotion);
-            if (event.emotionState) {
-              applyEmotionState(event.emotionState);
-            } else {
-              setEmotionState(null);
-            }
-          }
-          if (event.type === 'progress') {
-            setStatus(`${event.skillName}: ${event.message} (${Math.round(event.percent * 100)}%)`);
-          }
-          if (event.type === 'pending_action') {
-            setPendingAction(event.pendingAction);
-            setStatus(`等待确认: ${event.pendingAction.description || event.pendingAction.display_name || ''}`);
-          }
-          if (event.type === 'action') {
-            setActionLogs(current => [
-              ...current,
-              {
-                timestamp: event.action.timestamp || new Date().toISOString(),
-                message: event.action.message,
-                status: event.action.status,
-                appKey: event.action.app_key ?? null,
-                displayName: event.action.display_name ?? null,
-              },
-            ]);
-            if (!actionPanelExpanded) setActionPanelExpanded(true);
-            setStatus(event.action.message);
-          }
-          if (event.type === 'error') {
-            setError(event.hint);
-            setStatus('Action failed');
-          }
-          if (event.type === 'audio') {
-            const segId = "seg-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6);
-            setMessages(current => [
-              ...current,
-              {
-                id: segId, conversation_id: streamConversationId || 'pending',
-                role: 'assistant' as const, content: event.text,
-                route_mode: actualRouteMode, created_at: new Date().toISOString(),
-                status: 'streaming' as const, local: true,
-              },
-            ]);
-            playBase64Audio(event.audio);
-            if (event.emotion) setActiveEmotion(event.emotion);
-            if (event.emotionState) applyEmotionState(event.emotionState);
-            setSpokenLines(prev => [...prev, event.text]);
-            setStatus(event.text);
-          }
-          if (event.type === 'done') {
-            setMessages(current => {
-              const serverMessages = event.assistantMessages.map(toChatMessage);
-              const nonLocal = current.filter(item => !item.local);
-              return [...nonLocal, ...serverMessages];
-            });
-            if (event.assistantMessages && event.assistantMessages.length > 0) {
-              updateAvatarEmotion(event.assistantMessages[event.assistantMessages.length - 1]);
-            }
-            if (event.emotionState) {
-              applyEmotionState(event.emotionState);
-            }
-            if (event.pendingAction) {
-              setPendingAction(event.pendingAction);
-            }
-            refreshConversations();
-          }
-        },
-      });
-      setStatus('Ready');
-      notify('Reply complete');
-    } catch (nextError) {
-      const message = nextError instanceof ApiRequestError
-        ? getErrorMessage(nextError.status, nextError.message)
-        : nextError instanceof Error ? nextError.message : 'Failed to send message';
-      setError(message);
-      setStatus('Send failed');
-      setMessages(current => current.map(item => item.id === pendingId ? { ...item, status: 'failed' } : item));
-    } finally {
-      setStreaming(false);
-    }
   };
+
+// Text path is handled by useChatStream hook
 
   const sendVoiceInput = async (audio: Blob) => {
     if (!session || streaming) return;

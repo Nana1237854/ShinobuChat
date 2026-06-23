@@ -1,46 +1,36 @@
 import asyncio
 import logging
-from dataclasses import dataclass
-from types import SimpleNamespace
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.exceptions import NotFoundError, UpstreamServiceError
-from app.core.time import local_now
+from app.core.exceptions import UpstreamServiceError
 from app.models.conversation import Conversation
 from app.models.message import Message
-from app.models.user import User
 from app.schemas.message import MessageCreate, MessageRole, RouteMode
-from app.services.agent_orchestrator import AgentOrchestrator
 from app.services.agent_service import AgentService
 from app.services.agents import AgentCoordinator, MemoryAgent
-from app.services.agents.coordinator import DirectActionPlan
 from app.services.ai_client import AIClient
 from app.services.config_service import ConfigService
 from app.services.conversation_service import ConversationService
 from app.services.emotion_parser import parse_emotion_tag, resolve_emotion
-from app.services.sentence_splitter import split_long_sentence, split_sentences
 from app.services.skill_manager import SkillManager
 from app.services.skill_service import SkillRegistry
 from app.services.stream_events import SseEncoder, StreamEvent
-from app.services.text_cleaner import clean_tts_text
-from app.services.tts_pipeline import StreamProcessor
+from app.services.turn.conversation_turn_service import ConversationTurnService
+from app.services.turn.direct_action_runner import DirectActionRunner
+from app.services.turn.memory_write_scheduler import MemoryWriteScheduler
+from app.services.turn.reply_generation_service import ReplyGenerationService
+from app.services.turn.stream_event_service import StreamEventService
+from app.services.turn.turn_state import MessageTurnState
+from app.services.turn.voice_reply_service import VoiceReplyService
 from app.services.voice_service import VoiceService
 
-
-@dataclass
-class MessageStreamState:
-    conversation: Conversation
-    user_message: Message
-    route_mode: RouteMode
-    router_reason: str
-    progress_events: list[StreamEvent]
-    reply_text: str
-    conversation_mode: str = "companion"
-    direct_action: "DirectActionPlan | None" = None
+# Legacy alias — keep backward compatibility
+MessageStreamState = MessageTurnState
 
 
 class MessageService:
@@ -49,7 +39,7 @@ class MessageService:
         db: Session,
         skill_registry: SkillRegistry,
         agent: AgentService,
-        agent_orchestrator: AgentOrchestrator,
+        agent_orchestrator,  # AgentOrchestrator — kept for legacy run_task path
         ai_client: AIClient,
         sse: SseEncoder,
         voice_service: VoiceService | None = None,
@@ -71,239 +61,170 @@ class MessageService:
         self.config_service = config_service
         self.skill_manager = skill_manager
 
+        # Turn services
+        self.turn_service = ConversationTurnService(
+            db=db,
+            conversations=self.conversations,
+            agent_coordinator=agent_coordinator,
+            skill_manager=skill_manager,
+        )
+        self.event_service = StreamEventService(sse)
+        self.reply_generation_service = ReplyGenerationService(
+            ai_client=ai_client,
+            agent_coordinator=agent_coordinator,
+            skill_manager=skill_manager,
+        )
+        self.direct_action_runner = DirectActionRunner()
+        self.voice_reply_service = VoiceReplyService(voice_service, sse)
+        self.memory_write_scheduler = MemoryWriteScheduler(memory_agent)
+
     async def create_streaming_response(self, payload: MessageCreate):
-        state, messages = await asyncio.to_thread(self.prepare_stream, payload)
-        ai_config = (
-            self.config_service.resolve_runtime(payload.user_id)
-            if self.config_service is not None
-            else None
-        )
-        max_tokens = int(
-            (ai_config or {}).get(
-                "ai_lightweight_max_tokens", settings.ai_lightweight_max_tokens
-            )
-        )
+        state, messages = await asyncio.to_thread(self.turn_service.prepare_turn, payload)
 
-        yield self._format_event(StreamEvent("conversation", {
-            "conversation_id": str(state.conversation.id),
-            "route_mode": state.route_mode.value,
-            "title": state.conversation.title,
-            "user_message": self._serialize_message(state.user_message, emotion="neutral"),
-        }))
+        ai_config = self._resolve_ai_config(payload.user_id)
+        max_tokens = self._resolve_max_tokens(ai_config)
 
-        # ── Direct action path (F12): QuickIntentRouter detected a local app intent ──
-        if state.direct_action is not None:
-            action_result, pending_info = await asyncio.to_thread(
-                self._execute_direct_action,
-                payload.user_id,
+        yield self.event_service.format(
+            self.event_service.conversation_started(
                 state,
+                self.event_service.serialize_message(state.user_message, emotion="neutral"),
             )
-            yield self._format_event(StreamEvent("action", {
-                "action": state.direct_action.action,
-                "intent_type": state.direct_action.intent_type,
-                "status": action_result.get("status", "unknown"),
-                "message": action_result.get("message", ""),
-                "app_key": action_result.get("app_key"),
-                "display_name": action_result.get("display_name"),
-            }))
-            if pending_info:
-                yield self._format_event(StreamEvent("pending_action", pending_info))
+        )
 
-            # Build a friendly assistant reply for the direct action
-            full_reply = self._build_direct_action_reply(state.direct_action, action_result)
-            parsed_emotion, display_text = parse_emotion_tag(full_reply)
-            assistant_emotion = resolve_emotion(parsed_emotion)
-            state.reply_text = display_text
-            yield self._format_event(StreamEvent("emotion", {"emotion": assistant_emotion}))
-
-            direct_sentences = self._sentences_from_text(clean_tts_text(display_text))
-            if self.voice_service is not None and direct_sentences:
-                async for audio_event in self._stream_audio_sentences(
-                    direct_sentences, assistant_emotion, payload.content
-                ):
-                    yield audio_event
-            else:
-                for sentence in direct_sentences:
-                    yield self._format_event(StreamEvent("chunk", {"delta": sentence}))
-
-            assistant_messages = await asyncio.to_thread(self.save_sentences, state, direct_sentences)
-            done_payload: dict[str, object] = {
-                "conversation_id": str(state.conversation.id),
-                "assistant_messages": [
-                    self._serialize_message(message, emotion=assistant_emotion)
-                    for message in assistant_messages
-                ],
-            }
-            if pending_info:
-                done_payload["pending_action"] = pending_info
-            yield self._format_event(StreamEvent("done", done_payload))
-            self._schedule_memory_write(payload, state)
+        # ── Direct action path (F12) ──
+        if state.direct_action is not None:
+            async for event in self._handle_direct_action(payload.user_id, state):
+                yield self.event_service.format(event)
             return
 
         history = await asyncio.to_thread(
-            self.conversations.list_messages, state.conversation.id, payload.user_id
+            self.conversations.list_messages,
+            state.conversation.id,
+            payload.user_id,
         )
 
         full_reply = ""
-        if state.route_mode is RouteMode.CHAT:
-            for chunk in self.ai_client.stream_chat(
-                messages, max_tokens=max_tokens, runtime_config=ai_config
-            ):
-                full_reply += chunk
-        else:
-            for event in state.progress_events:
-                yield self._format_event(event)
-            for item in self._run_task_agent(
-                messages, history[:-1], payload.user_id, ai_config,
-                conversation_mode=state.conversation_mode,
-                conversation_id=state.conversation.id,
-            ):
-                if isinstance(item, StreamEvent):
-                    yield self._format_event(item)
-                else:
-                    full_reply = item
+        for item in self.reply_generation_service.generate(
+            state=state,
+            messages=messages,
+            history=history[:-1],
+            user_id=payload.user_id,
+            ai_config=ai_config,
+            max_tokens=max_tokens,
+        ):
+            if isinstance(item, StreamEvent):
+                yield self.event_service.format(item)
+            else:
+                full_reply = item
 
         if not full_reply:
             raise UpstreamServiceError("AI API returned an empty response")
 
         parsed_emotion, display_text = parse_emotion_tag(full_reply)
         assistant_emotion = resolve_emotion(parsed_emotion)
-
         state.reply_text = display_text
-        yield self._format_event(StreamEvent("emotion", {"emotion": assistant_emotion}))
 
-        tts_full = clean_tts_text(display_text)
-        raw_sentences, remaining = split_sentences(tts_full)
-        if remaining.strip():
-            raw_sentences.append(remaining.strip())
-
-        logger.debug("reply len=%d emotion=%s", len(full_reply), assistant_emotion)
-        sentences: list[str] = []
-        for sentence in raw_sentences:
-            if len(sentence) > 40:
-                sentences.extend(split_long_sentence(sentence))
-            elif len(sentence) >= 2:
-                sentences.append(sentence)
-        sentences = [sentence for sentence in sentences if len(sentence) >= 6]
-        if sentences:
-            logger.debug("sentences count=%d first_len=%d", len(sentences), len(sentences[0]) if sentences else 0)
-
-        if self.voice_service is not None and sentences:
-            processor = StreamProcessor(
-                voice_service=self.voice_service,
-                emotion=assistant_emotion,
-                context=[payload.content],
-                sse=self.sse,
-            )
-            for sentence in sentences:
-                processor.res_queue.put_nowait(sentence)
-            processor.finish_text()
-
-            tts_task = asyncio.create_task(processor.run_tts())
-            try:
-                while True:
-                    item = await processor.audio_queue.get()
-                    if item == "__DONE__":
-                        break
-                    if isinstance(item, dict):
-                        yield self._format_event(StreamEvent("audio", item))
-            finally:
-                processor.cancel()
-                await tts_task
-        else:
-            for sentence in sentences:
-                yield self._format_event(StreamEvent("chunk", {"delta": sentence}))
-
-        assistant_messages = await asyncio.to_thread(self.save_sentences, state, sentences)
-        yield self._format_event(StreamEvent("done", {
-            "conversation_id": str(state.conversation.id),
-            "assistant_messages": [
-                self._serialize_message(message, emotion=assistant_emotion)
-                for message in assistant_messages
-            ],
-        }))
-        self._schedule_memory_write(payload, state)
-
-    def prepare_stream(self, payload: MessageCreate) -> tuple[MessageStreamState, list[dict[str, str]]]:
-        user = self.db.query(User).filter(User.id == payload.user_id).first()
-        if not user:
-            raise NotFoundError("User not found")
-
-        conversation = self._resolve_conversation(payload)
-        history = self.conversations.list_messages(conversation.id, payload.user_id)
-        agent_plan = self._prepare_agent_plan(payload, history)
-        user_message = Message(
-            conversation_id=conversation.id,
-            role=MessageRole.USER.value,
-            content=payload.content.strip(),
-            route_mode=agent_plan.route_mode.value,
+        yield self.event_service.format(
+            self.event_service.emotion(assistant_emotion)
         )
-        self.db.add(user_message)
-        conversation.updated_at = local_now()
-        if conversation.title == "New conversation":
-            conversation.title = self._build_title(payload.content)
-        self.db.add(conversation)
-        self.db.commit()
-        self.db.refresh(conversation)
-        self.db.refresh(user_message)
 
-        return MessageStreamState(
-            conversation=conversation,
-            user_message=user_message,
-            route_mode=agent_plan.route_mode,
-            router_reason=agent_plan.router_decision.reason,
-            progress_events=agent_plan.progress_events,
-            reply_text="",
-            conversation_mode=agent_plan.conversation_mode,
-            direct_action=getattr(agent_plan, "direct_action", None),
-        ), agent_plan.messages
+        async for event in self.voice_reply_service.stream_reply(
+            text=display_text,
+            emotion=assistant_emotion,
+            context_content=payload.content,
+        ):
+            yield self.event_service.format(event)
 
-    def save_sentences(self, state: MessageStreamState, sentences: list[str]) -> list[Message]:
-        messages: list[Message] = []
-        for sentence_text in sentences:
-            message = Message(
-                conversation_id=state.conversation.id,
-                role=MessageRole.ASSISTANT.value,
-                content=sentence_text,
-                route_mode=state.route_mode.value,
-            )
-            self.db.add(message)
-            messages.append(message)
-        state.conversation.updated_at = local_now()
-        state.conversation.summary = self._build_summary(state.reply_text)
-        self.db.add(state.conversation)
-        self.db.commit()
-        for message in messages:
-            self.db.refresh(message)
-        self.db.refresh(state.conversation)
-        return messages
+        sentences = self.voice_reply_service.split_for_voice(display_text)
+
+        assistant_messages = await asyncio.to_thread(
+            self.turn_service.save_assistant_sentences,
+            state,
+            sentences,
+        )
+
+        yield self.event_service.format(
+            self.event_service.done(state, assistant_messages, assistant_emotion)
+        )
+
+        self.memory_write_scheduler.schedule_after_turn(payload, state)
+
+    # ------------------------------------------------------------------
+    # Direct action path
+    # ------------------------------------------------------------------
+
+    async def _handle_direct_action(self, user_id, state: MessageTurnState):
+        result = await asyncio.to_thread(
+            self.direct_action_runner.run,
+            user_id,
+            state,
+        )
+
+        yield self.event_service.action(result.action_result, state.direct_action)
+
+        if result.pending_info:
+            yield self.event_service.pending_action(result.pending_info)
+
+        full_reply = result.assistant_reply
+        parsed_emotion, display_text = parse_emotion_tag(full_reply)
+        assistant_emotion = resolve_emotion(parsed_emotion)
+        state.reply_text = display_text
+
+        yield self.event_service.emotion(assistant_emotion)
+
+        async for event in self.voice_reply_service.stream_reply(
+            text=display_text,
+            emotion=assistant_emotion,
+            context_content="",
+        ):
+            yield event
+
+        sentences = self.voice_reply_service.split_for_voice(display_text)
+
+        assistant_messages = await asyncio.to_thread(
+            self.turn_service.save_assistant_sentences,
+            state,
+            sentences,
+        )
+
+        done_payload = self.event_service.done(
+            state, assistant_messages, assistant_emotion,
+            pending_action=result.pending_info,
+        )
+        yield done_payload
+
+        self.memory_write_scheduler.schedule_after_turn(
+            MessageCreate(
+                user_id=user_id,
+                content="",
+                route_mode=state.route_mode,
+            ),
+            state,
+        )
+
+    # ------------------------------------------------------------------
+    # Legacy methods — preserved for backward compatibility
+    # ------------------------------------------------------------------
+
+    def prepare_stream(self, payload: MessageCreate):
+        """Legacy entry point. Delegates to ConversationTurnService."""
+        state, messages = self.turn_service.prepare_turn(payload)
+        return state, messages
+
+    def save_sentences(self, state: MessageTurnState, sentences: list[str]) -> list[Message]:
+        """Legacy entry point. Delegates to ConversationTurnService."""
+        return self.turn_service.save_assistant_sentences(state, sentences)
 
     def _build_ai_messages(self, content: str, route_mode: RouteMode, history: list[Message]) -> list[dict[str, str]]:
-        if route_mode is RouteMode.CHAT:
-            mode_instruction = "当前是纯聊天模式，优先自然陪伴、澄清想法，用 1-3 句话简短回复。"
-        elif route_mode is RouteMode.AGENT:
-            mode_instruction = "当前是 Agent 模式，优先把用户意图整理成可执行动作，并明确下一步。"
-        else:
-            mode_instruction = "当前是自动决策模式，先自然回应，再判断是否需要推进成任务流。"
-
-        messages: list[dict[str, str]] = [{
-            "role": MessageRole.SYSTEM.value,
-            "content": (
-                f"你是 ShinobuChat 的 AI 伙伴。用简洁、温暖、可靠的中文回复用户。{mode_instruction}"
-                "\n\n【重要】你的每条回复开头必须包含一个情绪标签，格式为 [emotion]。"
-                "可选情绪：happy、sad、angry、surprised、thinking、neutral。"
-                "根据你的回复内容选择最匹配的情绪。标签放在回复的最开头，后面接正文。"
-                "不要输出 JSON，不要解释标签，不要省略标签。"
-                "\n示例：[happy]今天天气真好！\n[sad]抱歉让你失望了..."
-            ),
-        }]
-        for message in history[-12:]:
-            if message.role in {MessageRole.USER.value, MessageRole.ASSISTANT.value}:
-                messages.append({"role": message.role, "content": message.content})
-        messages.append({"role": MessageRole.USER.value, "content": content})
-        return messages
+        """Legacy entry point. Delegates to ConversationTurnService."""
+        return self.turn_service._build_ai_messages(content, route_mode, history)
 
     def _prepare_agent_plan(self, payload: MessageCreate, history: list[Message]):
+        """Legacy entry point. Delegates to ConversationTurnService."""
+        from types import SimpleNamespace
+
+        from app.services.skill_service import Skill
+
         user_skills = (
             self.skill_manager.runtime_skills(payload.user_id)
             if self.skill_manager is not None
@@ -320,12 +241,13 @@ class MessageService:
             )
 
         messages = self._build_ai_messages(payload.content.strip(), payload.route_mode, history)
-
         return SimpleNamespace(
             route_mode=payload.route_mode,
             router_decision=SimpleNamespace(reason="legacy message service routing"),
             progress_events=[],
             messages=messages,
+            conversation_mode="companion",
+            direct_action=None,
         )
 
     def _run_task_agent(
@@ -337,6 +259,7 @@ class MessageService:
         conversation_mode: str = "companion",
         conversation_id=None,
     ):
+        """Legacy agent loop entry point."""
         user_skills = (
             self.skill_manager.runtime_skills(user_id)
             if self.skill_manager is not None
@@ -378,29 +301,39 @@ class MessageService:
             conversation_id=conversation_id,
         )
 
-    def _schedule_memory_write(self, payload: MessageCreate, state: MessageStreamState) -> None:
-        if self.memory_agent is None:
-            return
-        asyncio.create_task(
-            asyncio.to_thread(
-                self.memory_agent.extract_and_store_after_turn,
-                user_id=payload.user_id,
-                user_text=payload.content,
-                assistant_text=state.reply_text,
-                source_msg_id=state.user_message.id,
+    def _schedule_memory_write(self, payload: MessageCreate, state: MessageTurnState) -> None:
+        self.memory_write_scheduler.schedule_after_turn(payload, state)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_ai_config(self, user_id) -> dict | None:
+        if self.config_service is not None:
+            return self.config_service.resolve_runtime(user_id)
+        return None
+
+    def _resolve_max_tokens(self, ai_config: dict | None) -> int:
+        return int(
+            (ai_config or {}).get(
+                "ai_lightweight_max_tokens", settings.ai_lightweight_max_tokens
             )
         )
 
     def _resolve_conversation(self, payload: MessageCreate) -> Conversation:
         if payload.conversation_id:
             return self.conversations.get_for_user(payload.conversation_id, payload.user_id)
-        return self.conversations.create_for_user(payload.user_id, title=self._build_title(payload.content))
+        return self.conversations.create_for_user(
+            payload.user_id, title=self._build_title(payload.content),
+        )
 
-    def _build_title(self, content: str) -> str:
+    @staticmethod
+    def _build_title(content: str) -> str:
         flattened = " ".join(content.strip().split())
         return flattened[:36] if flattened else "New conversation"
 
-    def _build_summary(self, content: str) -> str:
+    @staticmethod
+    def _build_summary(content: str) -> str:
         flattened = " ".join(content.strip().split())
         return flattened[:140] if flattened else ""
 
@@ -414,118 +347,6 @@ class MessageService:
             "emotion": emotion,
             "created_at": message.created_at.isoformat(),
         }
-
-    # ------------------------------------------------------------------
-    # Direct action helpers (F12)
-    # ------------------------------------------------------------------
-
-    def _execute_direct_action(
-        self,
-        user_id,
-        state: MessageStreamState,
-    ) -> tuple[dict, dict | None]:
-        """Execute a DirectActionPlan via LocalAppService.
-
-        Returns (action_result, pending_info_or_none).
-        """
-        from app.db.session import SessionLocal
-        from app.services.local_agent_settings_service import LocalAgentSettingsService
-        from app.services.local_app_service import LocalAppService
-
-        da = state.direct_action
-        db = SessionLocal()
-        try:
-            # F16: check permission before executing quick-intent direct action
-            settings_svc = LocalAgentSettingsService(db)
-            if not settings_svc.is_local_launcher_enabled(user_id):
-                return {
-                    "status": "forbidden",
-                    "message": "Local Launcher 已关闭。请在设置 → 权限中心中开启后再试。",
-                }, None
-
-            svc = LocalAppService(db)
-            result = svc.open_app(
-                user_id,
-                intent_type=da.intent_type,
-                app_key=da.app_key,
-                conversation_id=state.conversation.id,
-                source="quick_intent",
-            )
-            pending_info = None
-            if result.get("status") == "requires_confirmation":
-                pending_info = {
-                    "pending_action_id": result.get("pending_action_id"),
-                    "action_type": da.action,
-                    "app_key": result.get("app_key"),
-                    "display_name": result.get("display_name"),
-                    "intent_type": da.intent_type,
-                    "status": "waiting_confirmation",
-                }
-            return result, pending_info
-        finally:
-            db.close()
-
-    @staticmethod
-    def _build_direct_action_reply(
-        direct_action: "DirectActionPlan",
-        result: dict,
-    ) -> str:
-        """Build a friendly assistant message for the direct action result."""
-        status = result.get("status", "failed")
-        display_name = result.get("display_name", direct_action.intent_type)
-        if status == "opened":
-            return f"[happy]好的，已为你打开 {display_name}~"
-        elif status == "requires_confirmation":
-            return f"[thinking]{display_name} 需要确认才能打开哦，请确认一下~"
-        elif status == "not_configured":
-            return f"[neutral]我还没配置 {direct_action.intent_type} 对应的应用呢，去设置里绑定一下吧~"
-        elif status == "requires_selection":
-            return f"[thinking]有多个应用匹配 {direct_action.intent_type}，请在设置中选择一个默认应用~"
-        else:
-            return f"[neutral]抱歉，打开 {display_name} 失败了，可能是路径有问题，去检查一下吧~"
-
-    @staticmethod
-    def _sentences_from_text(text: str) -> list[str]:
-        """Split cleaned text into TTS-ready sentences."""
-        raw_sentences, remaining = split_sentences(text)
-        if remaining.strip():
-            raw_sentences.append(remaining.strip())
-        sentences: list[str] = []
-        for sentence in raw_sentences:
-            if len(sentence) > 40:
-                sentences.extend(split_long_sentence(sentence))
-            elif len(sentence) >= 2:
-                sentences.append(sentence)
-        return [s for s in sentences if len(s) >= 6]
-
-    async def _stream_audio_sentences(
-        self,
-        sentences: list[str],
-        emotion: str,
-        context_content: str,
-    ):
-        """Yield audio SSE events for each sentence, using VoiceService."""
-        processor = StreamProcessor(
-            voice_service=self.voice_service,
-            emotion=emotion,
-            context=[context_content],
-            sse=self.sse,
-        )
-        for sentence in sentences:
-            processor.res_queue.put_nowait(sentence)
-        processor.finish_text()
-
-        tts_task = asyncio.create_task(processor.run_tts())
-        try:
-            while True:
-                item = await processor.audio_queue.get()
-                if item == "__DONE__":
-                    break
-                if isinstance(item, dict):
-                    yield self._format_event(StreamEvent("audio", item))
-        finally:
-            processor.cancel()
-            await tts_task
 
     def _format_event(self, event: StreamEvent) -> str:
         return self.sse.encode(event)
