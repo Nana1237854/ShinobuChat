@@ -6,6 +6,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -181,6 +182,7 @@ class DiaryService:
             mood=result.get("mood"),
             tags=result.get("tags") or [],
             source_ids=[str(cid) for cid in ctx.get("conversation_ids", [])],
+            force=force,
         )
         return DiaryGenerateResponse.model_validate(diary)
 
@@ -192,8 +194,12 @@ class DiaryService:
         try:
             val = self.config_service.get_effective_value(user_id, "diary_enabled")
             return val if isinstance(val, bool) else True
-        except Exception:
-            return True
+        except Exception as exc:
+            logger.warning(
+                "Failed to read diary_enabled for user_id=%s; denying diary generation (fail-closed)",
+                user_id, exc_info=True,
+            )
+            return False
 
     def _parse_date(self, payload: DiaryGenerateRequest | None) -> date:
         if payload and payload.date:
@@ -237,10 +243,17 @@ class DiaryService:
         else:
             ctx["messages"] = []
 
-        # Todos
+        # Todos — scoped to today: created, updated, or due today
         todos = (
             self.db.query(Todo)
-            .filter(Todo.user_id == user_id, Todo.created_at < day_end)
+            .filter(
+                Todo.user_id == user_id,
+                or_(
+                    (Todo.created_at >= day_start) & (Todo.created_at < day_end),
+                    (Todo.updated_at >= day_start) & (Todo.updated_at < day_end),
+                    (Todo.due_at >= day_start) & (Todo.due_at < day_end),
+                ),
+            )
             .order_by(Todo.created_at.desc())
             .limit(20)
             .all()
@@ -404,12 +417,25 @@ class DiaryService:
                 return None
 
             parsed = _extract_json_object(content)
+
+            # Mood whitelist
+            VALID_MOODS = {"happy", "worried", "tired", "neutral", "productive", "calm"}
+            raw_mood = str(parsed.get("mood") or "neutral").strip().lower()
+            mood = raw_mood if raw_mood in VALID_MOODS else "neutral"
+
+            # Tag normalization: flatten, strip, deduplicate, limit to 3
+            raw_tags = parsed.get("tags", [])
+            if isinstance(raw_tags, list):
+                tags = [str(t).strip()[:20] for t in raw_tags if str(t).strip()][:3]
+            else:
+                tags = []
+
             return {
                 "title": str(parsed.get("title") or "今日日记")[:50],
                 "summary": str(parsed.get("summary") or parsed.get("content", ""))[:100],
                 "content": str(parsed.get("content") or content)[:2000],
-                "mood": str(parsed.get("mood") or "neutral")[:20],
-                "tags": parsed.get("tags") if isinstance(parsed.get("tags"), list) else [],
+                "mood": mood,
+                "tags": tags,
             }
         except Exception:
             logger.warning("LLM diary generation failed, using fallback", exc_info=True)
@@ -466,14 +492,16 @@ class DiaryService:
         mood: str | None,
         tags: list[str],
         source_ids: list[str],
+        force: bool = False,
     ) -> Diary:
-        # Upsert: delete existing if force (caller handles this)
         existing = (
             self.db.query(Diary)
             .filter(Diary.user_id == user_id, Diary.date == diary_date)
             .first()
         )
-        if existing:
+        if existing and not force:
+            return existing
+        if existing and force:
             self.db.delete(existing)
             self.db.flush()
 
