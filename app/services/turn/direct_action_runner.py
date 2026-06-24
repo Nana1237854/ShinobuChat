@@ -1,10 +1,50 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from uuid import UUID
 
 from app.db.session import SessionLocal
+from app.schemas.context_intent import ContextIntentResult
 from app.services.turn.turn_state import MessageTurnState
+
+
+@dataclass
+class ContextDirectAction:
+    """Lightweight direct-action-like object, fully compatible with
+    DirectActionPlan fields used by build_reply() and StreamEventService.action().
+    """
+    action: str = "open_local_app"
+    intent_type: str | None = None
+    app_key: str | None = None
+    app_name: str | None = None
+    query: str | None = None
+    label: str = ""
+    confidence: float = 0.0
+
+
+_RELAUNCH_PATTERNS: list[re.Pattern] = [
+    re.compile(p)
+    for p in [
+        r"重新打开",
+        r"重启",
+        r"再开一[个下]",
+        r"再打开",
+        r"关掉再打开",
+        r"关掉再开",
+        r"重新启动",
+        r"再启动",
+        r"再运行",
+    ]
+]
+
+
+def _is_relaunch_intent(user_text: str) -> bool:
+    """Return True when the user explicitly asks to re-launch / restart."""
+    text = (user_text or "").strip()
+    if not text:
+        return False
+    return any(p.search(text) for p in _RELAUNCH_PATTERNS)
 
 
 @dataclass
@@ -41,16 +81,23 @@ class DirectActionRunner:
                     assistant_reply=self.build_reply(da, result),
                 )
 
+            user_text = (
+                getattr(da, "query", None)
+                or (state.user_message.content if state.user_message else None)
+                or ""
+            )
+            force_relaunch = _is_relaunch_intent(user_text)
+
             svc = LocalAppService(db)
             result = svc.open_app(
                 user_id,
                 intent_type=da.intent_type,
                 app_key=da.app_key or None,
                 app_name=getattr(da, "app_name", None) or None,
-                query=getattr(da, "query", None)
-                    or (state.user_message.content if state.user_message else None),
+                query=user_text,
                 conversation_id=state.conversation.id,
                 source="quick_intent",
+                force_relaunch=force_relaunch,
             )
 
             pending_action_id = result.get("pending_action_id")
@@ -72,6 +119,77 @@ class DirectActionRunner:
                     "created_at": result.get("created_at"),
                 }
 
+            return DirectActionResult(
+                action_result=result,
+                pending_info=pending_info,
+                assistant_reply=self.build_reply(da, result),
+            )
+        finally:
+            db.close()
+
+    def run_from_context_intent(
+        self, user_id: UUID, state: MessageTurnState, intent: ContextIntentResult
+    ) -> DirectActionResult:
+        """Execute an action resolved by ContextIntentResolver.
+
+        Applies F16 permission check before calling LocalAppService.open_app().
+        Does NOT pass force_relaunch / bring_to_front — those are v1 hints only.
+        """
+        from app.domains.local_agent.local_agent_settings_service import LocalAgentSettingsService
+        from app.domains.local_agent.local_app_service import LocalAppService
+
+        db = self.session_factory()
+        try:
+            # F16: permission check FIRST
+            settings_svc = LocalAgentSettingsService(db)
+            if not settings_svc.is_local_launcher_enabled(user_id):
+                return DirectActionResult(
+                    action_result={"status": "forbidden", "message": "Local Launcher 已关闭"},
+                    pending_info=None,
+                    assistant_reply=self.build_reply(
+                        ContextDirectAction(
+                            intent_type=intent.intent_type,
+                            app_name=intent.app_name,
+                        ),
+                        {"status": "forbidden"},
+                    ),
+                )
+
+            svc = LocalAppService(db)
+            result = svc.open_app(
+                user_id,
+                intent_type=intent.intent_type,
+                app_key=intent.app_key or None,
+                app_name=intent.app_name or None,
+                query=intent.query or state.user_message.content,
+                conversation_id=state.conversation.id,
+                source="context_intent",
+            )
+
+            pending_info = None
+            pid = result.get("pending_action_id")
+            if result.get("status") == "requires_confirmation" and pid:
+                pending_info = {
+                    "id": pid,
+                    "pending_action_id": pid,
+                    "user_id": str(user_id),
+                    "conversation_id": str(state.conversation.id),
+                    "action_type": "open_local_app",
+                    "app_key": result.get("app_key"),
+                    "display_name": result.get("display_name"),
+                    "description": result.get("message") or "",
+                    "intent_type": intent.intent_type,
+                    "status": "waiting_confirmation",
+                    "expires_at": result.get("expires_at"),
+                    "created_at": result.get("created_at"),
+                }
+
+            da = ContextDirectAction(
+                intent_type=intent.intent_type,
+                app_key=intent.app_key,
+                app_name=intent.app_name,
+                query=intent.query,
+            )
             return DirectActionResult(
                 action_result=result,
                 pending_info=pending_info,

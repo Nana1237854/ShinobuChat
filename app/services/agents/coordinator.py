@@ -67,14 +67,20 @@ class AgentCoordinator:
         user_skills: list[Skill] | None = None,
         conversation_id: uuid.UUID | None = None,
         vision_context: str | None = None,
+        enable_quick_intent: bool = True,
     ) -> AgentPlan:
         # Quick-intent detection (F12): check BEFORE RouterAgent for auto mode
         direct_action: DirectActionPlan | None = None
-        if requested_route_mode is RouteMode.AUTO:
+        if enable_quick_intent and requested_route_mode is RouteMode.AUTO:
             direct_action = self._check_quick_intent(content, user_id)
 
         decision = self.resolve_route(requested_route_mode, content, history)
         memory_context = self.memory_agent.search(user_id, content)
+
+        # Legacy Character — base personality layer (highest non-safety priority)
+        character_context = self._legacy_character_context(user_id)
+        if character_context:
+            memory_context = [character_context, *memory_context]
 
         # Conversation mode context — dynamic turn-level hint, NOT base_system
         conversation_mode, mode_context = self._conversation_mode_context(user_id)
@@ -296,6 +302,45 @@ class AgentCoordinator:
                 exc,
             )
             return "companion", ""
+
+    @staticmethod
+    def _legacy_character_context(user_id: uuid.UUID) -> str:
+        """Build the legacy Character base personality layer prompt.
+
+        Injected as the highest non-safety TurnScratch context.
+        Order in final prompt:
+        1. Character base layer (if enabled and has content)
+        2. Character supplement
+        3. Base persona fallback (if Character disabled or empty)
+        """
+        try:
+            from app.db.session import SessionLocal
+            from app.services.legacy_character_service import LegacyCharacterService
+
+            db = SessionLocal()
+            try:
+                svc = LegacyCharacterService(db)
+                legacy = svc.get(user_id)
+
+                if legacy.enabled and svc.has_main_content(legacy):
+                    parts: list[str] = []
+                    base = svc.build_character_base_prompt(legacy)
+                    if base:
+                        parts.append(base)
+                    supp = svc.build_character_supplement_prompt(legacy)
+                    if supp:
+                        parts.append(supp)
+                    return "\n\n".join(parts)
+                else:
+                    from app.services.legacy_character_service import DEFAULT_BASE_PERSONA
+
+                    return f"【基础角色设定】\n{DEFAULT_BASE_PERSONA}"
+            finally:
+                db.close()
+        except Exception:
+            from app.services.legacy_character_service import DEFAULT_BASE_PERSONA
+
+            return f"【基础角色设定】\n{DEFAULT_BASE_PERSONA}"
 
     @staticmethod
     def _persona_tone_context(user_id: uuid.UUID) -> str:

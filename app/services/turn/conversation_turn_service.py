@@ -32,7 +32,7 @@ class ConversationTurnService:
         self.agent_coordinator = agent_coordinator
         self.skill_manager = skill_manager
 
-    def prepare_turn(self, payload: MessageCreate) -> tuple[MessageTurnState, list[dict]]:
+    def prepare_turn(self, payload: MessageCreate, enable_quick_intent: bool = True) -> tuple[MessageTurnState, list[dict]]:
         user = self.db.query(User).filter(User.id == payload.user_id).first()
         if not user:
             raise NotFoundError("User not found")
@@ -41,7 +41,7 @@ class ConversationTurnService:
         history = self.conversations.list_messages(conversation.id, payload.user_id)
         user_skills = self._runtime_skills(payload.user_id)
 
-        agent_plan = self._prepare_agent_plan(payload, history, user_skills)
+        agent_plan = self._prepare_agent_plan(payload, history, user_skills, enable_quick_intent=enable_quick_intent)
         user_message = Message(
             conversation_id=conversation.id,
             role=MessageRole.USER.value,
@@ -125,7 +125,7 @@ class ConversationTurnService:
             return []
         return self.skill_manager.runtime_skills(user_id)
 
-    def _prepare_agent_plan(self, payload: MessageCreate, history: list[Message], user_skills):
+    def _prepare_agent_plan(self, payload: MessageCreate, history: list[Message], user_skills, enable_quick_intent: bool = True):
         if self.agent_coordinator is not None:
             return self.agent_coordinator.prepare(
                 requested_route_mode=payload.route_mode,
@@ -134,6 +134,8 @@ class ConversationTurnService:
                 history=history,
                 user_skills=user_skills,
                 vision_context=payload.vision_context,
+                enable_quick_intent=enable_quick_intent,
+                conversation_id=payload.conversation_id,
             )
 
         from types import SimpleNamespace

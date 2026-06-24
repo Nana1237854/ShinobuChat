@@ -31,6 +31,9 @@ from app.services.live2d_service import Live2DService
 from app.services.mode_service import ModeService
 from app.services.memory_service import MemoryService
 from app.services.message_service import MessageService
+from app.services.turn.context_intent_resolver import ContextIntentResolver
+from app.services.turn.context_pack_builder import ContextPackBuilder
+from app.services.turn.pending_conversation_intent_service import PendingConversationIntentService
 from app.services.skill_manager import SkillManager
 from app.services.skill_service import SkillRegistry
 from app.services.stream_events import SseEncoder
@@ -233,6 +236,12 @@ def get_persona_service(db: Session = Depends(get_db)) -> PersonaSettingsService
     return PersonaSettingsService(db)
 
 
+def get_legacy_character_service(db: Session = Depends(get_db)):
+    from app.services.legacy_character_service import LegacyCharacterService
+
+    return LegacyCharacterService(db)
+
+
 def get_goal_service(db: Session = Depends(get_db)) -> GoalService:
     return GoalService(db)
 
@@ -250,7 +259,30 @@ def get_chat_service(db: Session = Depends(get_db)) -> ChatService:
     )
 
 
+@lru_cache
+def get_pending_conversation_intent_service() -> PendingConversationIntentService:
+    return PendingConversationIntentService()
+
+
+@lru_cache
+def get_context_intent_resolver() -> ContextIntentResolver:
+    return ContextIntentResolver(ai_client=get_ai_client())
+
+
 def get_message_service(db: Session = Depends(get_db)) -> MessageService:
+    memory_svc = get_memory_service()
+    diary_svc = get_diary_service(db)
+    pending_intent_svc = get_pending_conversation_intent_service()
+    intent_resolver = get_context_intent_resolver()
+
+    context_pack_builder = ContextPackBuilder(
+        session_factory=SessionLocal,
+        memory_service=memory_svc,
+        diary_service=diary_svc,
+        pending_conversation_intent_service=pending_intent_svc,
+        config_service=ConfigService(db),
+    )
+
     return MessageService(
         db,
         get_skill_registry(),
@@ -263,8 +295,11 @@ def get_message_service(db: Session = Depends(get_db)) -> MessageService:
         get_memory_agent(),
         ConfigService(db),
         SkillManager(db),
-        memory_service=get_memory_service(),
-        diary_service=get_diary_service(db),
+        memory_service=memory_svc,
+        diary_service=diary_svc,
+        context_pack_builder=context_pack_builder,
+        context_intent_resolver=intent_resolver,
+        pending_conversation_intent_service=pending_intent_svc,
     )
 
 

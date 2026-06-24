@@ -58,14 +58,16 @@ export function PendingActionCard({ accessToken, action, onResolved }: PendingAc
     }
   }, [action.status, onResolved]);
 
+  const actionId = action.id || (action as any).pending_action_id;
+
   const handleConfirm = async () => {
-    if (!action.id) {
+    if (!actionId) {
       setResultMessage('无法确认：缺少 pending action id');
       return;
     }
     setBusy(true);
     try {
-      const result = await confirmPendingAction(accessToken, action.id);
+      const result = await confirmPendingAction(accessToken, actionId);
       setResultMessage(result.result_message || '已确认执行');
     } catch {
       // Backend may have already resolved it; dismiss the card regardless
@@ -75,13 +77,13 @@ export function PendingActionCard({ accessToken, action, onResolved }: PendingAc
   };
 
   const handleCancel = async () => {
-    if (!action.id) {
+    if (!actionId) {
       setResultMessage('无法取消：缺少 pending action id');
       return;
     }
     setBusy(true);
     try {
-      await cancelPendingAction(accessToken, action.id);
+      await cancelPendingAction(accessToken, actionId);
       setResultMessage('已取消');
     } catch {
       // Backend may have already resolved it; dismiss the card regardless
